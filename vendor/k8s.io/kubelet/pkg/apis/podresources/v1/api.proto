@@ -45,6 +45,10 @@ message PodResources {
     string name = 1;
     string namespace = 2;
     repeated ContainerResources containers = 3;
+
+    // Private extension: UID of the kubelet Pod object used to resolve these resources.
+    // For static pods this is the local Pod UID, not the mirror Pod UID.
+    string pod_uid = 100;
 }
 
 // ContainerResources contains information about the resources assigned to a container

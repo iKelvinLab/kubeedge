@@ -63,6 +63,7 @@ func (p *v1PodResourcesServer) List(ctx context.Context, req *podresourcesv1.Lis
 		pRes := podresourcesv1.PodResources{
 			Name:       pod.Name,
 			Namespace:  pod.Namespace,
+			PodUid:     string(pod.UID),
 			Containers: make([]*podresourcesv1.ContainerResources, 0, len(pod.Spec.Containers)),
 		}
 
@@ -123,6 +124,7 @@ func (p *v1PodResourcesServer) Get(ctx context.Context, req *podresourcesv1.GetP
 	podResources := &podresourcesv1.PodResources{
 		Name:       pod.Name,
 		Namespace:  pod.Namespace,
+		PodUid:     string(pod.UID),
 		Containers: make([]*podresourcesv1.ContainerResources, 0, len(pod.Spec.Containers)),
 	}
 

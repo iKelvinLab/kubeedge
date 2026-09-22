@@ -2143,7 +2143,7 @@ k8s.io/kubectl/pkg/util/storage
 k8s.io/kubectl/pkg/util/templates
 k8s.io/kubectl/pkg/util/term
 k8s.io/kubectl/pkg/validation
-# k8s.io/kubelet v0.32.10 => github.com/kubeedge/kubernetes/staging/src/k8s.io/kubelet v1.32.10-kubeedge1
+# k8s.io/kubelet v0.32.10 => github.com/iKelvinLab/kubeedge-kubernetes/staging/src/k8s.io/kubelet v1.32.10-kubeedge2
 ## explicit; go 1.23.0
 k8s.io/kubelet/config/v1
 k8s.io/kubelet/config/v1beta1
@@ -2159,7 +2159,7 @@ k8s.io/kubelet/pkg/cri/streaming
 k8s.io/kubelet/pkg/cri/streaming/portforward
 k8s.io/kubelet/pkg/cri/streaming/remotecommand
 k8s.io/kubelet/pkg/types
-# k8s.io/kubernetes v1.32.10 => github.com/kubeedge/kubernetes v1.32.10-kubeedge1
+# k8s.io/kubernetes v1.32.10 => github.com/iKelvinLab/kubeedge-kubernetes v1.32.10-kubeedge2
 ## explicit; go 1.23.0
 k8s.io/kubernetes/cmd/kubeadm/app/apis/bootstraptoken/v1
 k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm
@@ -2846,8 +2846,8 @@ sigs.k8s.io/yaml/goyaml.v3
 # k8s.io/kube-proxy => github.com/kubeedge/kubernetes/staging/src/k8s.io/kube-proxy v1.32.10-kubeedge1
 # k8s.io/kube-scheduler => github.com/kubeedge/kubernetes/staging/src/k8s.io/kube-scheduler v1.32.10-kubeedge1
 # k8s.io/kubectl => github.com/kubeedge/kubernetes/staging/src/k8s.io/kubectl v1.32.10-kubeedge1
-# k8s.io/kubelet => github.com/kubeedge/kubernetes/staging/src/k8s.io/kubelet v1.32.10-kubeedge1
-# k8s.io/kubernetes => github.com/kubeedge/kubernetes v1.32.10-kubeedge1
+# k8s.io/kubelet => github.com/iKelvinLab/kubeedge-kubernetes/staging/src/k8s.io/kubelet v1.32.10-kubeedge2
+# k8s.io/kubernetes => github.com/iKelvinLab/kubeedge-kubernetes v1.32.10-kubeedge2
 # k8s.io/metrics => github.com/kubeedge/kubernetes/staging/src/k8s.io/metrics v1.32.10-kubeedge1
 # k8s.io/mount-utils => github.com/kubeedge/kubernetes/staging/src/k8s.io/mount-utils v1.32.10-kubeedge1
 # k8s.io/node-api => github.com/kubeedge/kubernetes/staging/src/k8s.io/node-api v1.32.10-kubeedge1
