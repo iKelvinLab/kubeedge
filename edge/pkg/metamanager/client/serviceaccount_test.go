@@ -27,6 +27,8 @@ import (
 
 	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
 	"github.com/kubeedge/beehive/pkg/core/model"
+	"gopkg.in/square/go-jose.v2"
+	"gopkg.in/square/go-jose.v2/jwt"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -206,12 +208,12 @@ func TestServiceAccountTokenCacheLifecycle(t *testing.T) {
 
 	older := request.DeepCopy()
 	older.Status = authenticationv1.TokenRequestStatus{
-		Token:               "older-token",
+		Token:               signedToken(t, jwt.NewNumericDate(now.Add(30*time.Minute))),
 		ExpirationTimestamp: metav1.NewTime(now.Add(30 * time.Minute)),
 	}
 	newest := request.DeepCopy()
 	newest.Status = authenticationv1.TokenRequestStatus{
-		Token:               "newest-token",
+		Token:               signedToken(t, jwt.NewNumericDate(now.Add(time.Hour))),
 		ExpirationTimestamp: metav1.NewTime(now.Add(time.Hour)),
 	}
 	olderKey := insertCachedToken(t, metaService, "test-sa", "test-ns", older)
@@ -234,7 +236,7 @@ func TestServiceAccountTokenCacheLifecycle(t *testing.T) {
 	refreshRequest.Spec.BoundObjectRef.UID = types.UID("refresh-pod-uid")
 	refreshCandidate := refreshRequest.DeepCopy()
 	refreshCandidate.Status = authenticationv1.TokenRequestStatus{
-		Token:               "refresh-token",
+		Token:               signedToken(t, jwt.NewNumericDate(now.Add(5*time.Minute))),
 		ExpirationTimestamp: metav1.NewTime(now.Add(5 * time.Minute)),
 	}
 	refreshKey := insertCachedToken(t, metaService, "test-sa", "test-ns", refreshCandidate)
@@ -250,7 +252,7 @@ func TestServiceAccountTokenCacheLifecycle(t *testing.T) {
 		t.Fatalf("refresh candidate rows = %v, want one retained row", rows)
 	}
 
-	gcExpiredTokensOnce(metaService, now.Add(31*time.Minute))
+	gcExpiredTokensOnce(metaService, now.Add(32*time.Minute))
 	assertCachedTokenCount(t, metaService, olderKey, 0)
 	assertCachedTokenCount(t, metaService, newestKey, 1)
 	assertCachedTokenCount(t, metaService, refreshKey, 0)
@@ -309,18 +311,25 @@ func TestTokenExistsContinuesPastMalformedRows(t *testing.T) {
 
 func TestGCExpiredTokensOnce(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
+	expired := signedToken(t, jwt.NewNumericDate(now.Add(-jwt.DefaultLeeway-time.Second)))
 	metas := []models.Meta{
-		{Key: "expired", Value: marshalTokenRequest(t, "expired", now.Add(-time.Second))},
-		{Key: "expires-now", Value: marshalTokenRequest(t, "expires-now", now)},
-		{Key: "fresh", Value: marshalTokenRequest(t, "fresh", now.Add(time.Second))},
-		{Key: "zero", Value: marshalTokenRequest(t, "zero", time.Time{})},
+		{Key: "expired", Value: marshalTokenRequest(t, expired, now.Add(-time.Second))},
+		{Key: "expired-with-future-response", Value: marshalTokenRequest(t, expired, now.Add(time.Hour))},
+		{Key: "expired-with-zero-response", Value: marshalTokenRequest(t, expired, time.Time{})},
+		{Key: "expires-now", Value: marshalTokenRequest(t, signedToken(t, jwt.NewNumericDate(now)), now)},
+		{Key: "leeway-boundary", Value: marshalTokenRequest(t, signedToken(t, jwt.NewNumericDate(now.Add(-jwt.DefaultLeeway))), now.Add(-time.Hour))},
+		{Key: "fresh", Value: marshalTokenRequest(t, signedToken(t, jwt.NewNumericDate(now.Add(time.Hour))), now.Add(time.Hour))},
+		{Key: "extended", Value: marshalTokenRequest(t, signedToken(t, jwt.NewNumericDate(now.Add(24*time.Hour))), now.Add(-time.Hour))},
+		{Key: "no-exp", Value: marshalTokenRequest(t, signedToken(t, nil), now.Add(-time.Hour))},
+		{Key: "invalid-claims", Value: marshalTokenRequest(t, signTokenClaims(t, map[string]interface{}{"exp": "invalid"}), now.Add(-time.Hour))},
+		{Key: "invalid-token", Value: marshalTokenRequest(t, "not-a-jwt", now.Add(-time.Hour))},
 		{Key: "invalid", Value: "not-json"},
 	}
 	metaStore := &fakeServiceAccountTokenMetaStore{metas: &metas}
 
 	gcExpiredTokensOnce(metaStore, now)
 
-	if got, want := strings.Join(metaStore.deletedKeys, ","), "expired,expires-now"; got != want {
+	if got, want := strings.Join(metaStore.deletedKeys, ","), "expired,expired-with-future-response,expired-with-zero-response"; got != want {
 		t.Fatalf("gcExpiredTokensOnce() deleted %q, want %q", got, want)
 	}
 	if metaStore.queryKey != "type" || metaStore.queryCondition != model.ResourceTypeServiceAccountToken {
@@ -330,9 +339,10 @@ func TestGCExpiredTokensOnce(t *testing.T) {
 
 func TestGCExpiredTokensOnceContinuesAfterDeleteError(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
+	expired := signedToken(t, jwt.NewNumericDate(now.Add(-time.Hour)))
 	metas := []models.Meta{
-		{Key: "first", Value: marshalTokenRequest(t, "first", now.Add(-time.Second))},
-		{Key: "second", Value: marshalTokenRequest(t, "second", now.Add(-time.Second))},
+		{Key: "first", Value: marshalTokenRequest(t, expired, now.Add(-time.Second))},
+		{Key: "second", Value: marshalTokenRequest(t, expired, now.Add(-time.Second))},
 	}
 	metaStore := &fakeServiceAccountTokenMetaStore{
 		metas:        &metas,
@@ -370,6 +380,54 @@ func TestRunExpiredTokenGCStops(t *testing.T) {
 	if metaStore.queryCalls != 1 {
 		t.Fatalf("runExpiredTokenGC() query calls = %d, want 1", metaStore.queryCalls)
 	}
+}
+
+func TestServiceAccountTokenExtendedLifetimeStillRequiresRefresh(t *testing.T) {
+	dao.Init(serviceAccountTestDBPath, &edgecorev1alpha2.MetaManager{Enable: true})
+	metaService := dbclient.NewMetaService()
+	now := time.Now().Truncate(time.Second)
+	ttl := int64(3607)
+	request := &authenticationv1.TokenRequest{
+		Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &ttl},
+	}
+	response := request.DeepCopy()
+	response.Status = authenticationv1.TokenRequestStatus{
+		Token:               signedToken(t, jwt.NewNumericDate(now.Add(24*time.Hour))),
+		ExpirationTimestamp: metav1.NewTime(now.Add(-time.Hour)),
+	}
+	key := insertCachedToken(t, metaService, "extended-sa", "test-ns", response)
+	t.Cleanup(func() { _ = metaService.DeleteMetaByKey(key) })
+
+	gcExpiredTokensOnce(metaService, now)
+	if !CheckTokenExist(response.Status.Token) {
+		t.Fatal("GC removed a token whose JWT has not expired")
+	}
+	if _, err := getTokenLocally("extended-sa", "test-ns", request); err == nil {
+		t.Fatal("JWT lifetime extension must not suppress token refresh")
+	}
+	gcExpiredTokensOnce(metaService, now.Add(24*time.Hour+jwt.DefaultLeeway+time.Second))
+	assertCachedTokenCount(t, metaService, key, 0)
+}
+
+func signedToken(t *testing.T, expiry *jwt.NumericDate) string {
+	t.Helper()
+	return signTokenClaims(t, jwt.Claims{Expiry: expiry})
+}
+
+func signTokenClaims(t *testing.T, claims interface{}) string {
+	t.Helper()
+	signer, err := jose.NewSigner(jose.SigningKey{
+		Algorithm: jose.HS256,
+		Key:       []byte("test-only-service-account-signing-key"),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwt.Signed(signer).Claims(claims).CompactSerialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 func marshalTokenRequest(t *testing.T, token string, expiresAt time.Time) string {

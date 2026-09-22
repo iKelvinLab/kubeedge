@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/square/go-jose.v2/jwt"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -320,8 +321,24 @@ func gcExpiredTokensOnce(metaStore serviceAccountTokenMetaStore, now time.Time) 
 			klog.Errorf("unmarshal service account token %s for garbage collection failed: %v", meta.Key, err)
 			continue
 		}
-		expiresAt := tokenRequest.Status.ExpirationTimestamp
-		if expiresAt.IsZero() || expiresAt.Time.After(now) {
+		// TokenRequest expiration controls rotation, but the API server can
+		// extend the JWT's lifetime beyond it. Authentication without public
+		// keys relies on this cached token, so keep it until its JWT expires.
+		token, err := jwt.ParseSigned(tokenRequest.Status.Token)
+		if err != nil {
+			klog.Errorf("cannot parse cached service account token %s for garbage collection", meta.Key)
+			continue
+		}
+		var claims jwt.Claims
+		// Only read tokens already persisted from the trusted cloud response.
+		// This determines retention, not authentication of an incoming token.
+		if err := token.UnsafeClaimsWithoutVerification(&claims); err != nil {
+			klog.Errorf("cannot parse cached service account token claims %s for garbage collection", meta.Key)
+			continue
+		}
+		// Match the leeway used by MetaServer's claims validator. If expiry is
+		// unknown, leave the record for Pod deletion rather than guess its TTL.
+		if claims.Expiry == nil || !now.Add(-jwt.DefaultLeeway).After(claims.Expiry.Time()) {
 			continue
 		}
 		if err := metaStore.DeleteMetaByKey(meta.Key); err != nil {
