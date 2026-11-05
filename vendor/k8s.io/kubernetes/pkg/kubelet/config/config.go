@@ -103,12 +103,24 @@ func (c *PodConfig) Channel(ctx context.Context, source string) chan<- interface
 	return c.mux.ChannelWithContext(ctx, source)
 }
 
-// SeenAllSources returns true if seenSources contains all sources in the
-// config, and also this config has received a SET message from each source.
+// SeenAllSources returns true after EdgeD has submitted its initial pod list,
+// this config has received a SET from every source, and kubelet has processed
+// updates from every source. Submitting a list alone is not sufficient: the
+// asynchronous update may not have reached kubelet's pod manager yet.
 func (c *PodConfig) SeenAllSources(seenSources sets.Set[string]) bool {
 	c.podReadyLock.RLock()
 	defer c.podReadyLock.RUnlock()
-	return c.initPodReady
+	if !c.initPodReady {
+		return false
+	}
+	c.sourcesLock.Lock()
+	defer c.sourcesLock.Unlock()
+	if !seenSources.IsSuperset(c.sources) {
+		return false
+	}
+	c.pods.sourcesSeenLock.RLock()
+	defer c.pods.sourcesSeenLock.RUnlock()
+	return c.pods.sourcesSeen.IsSuperset(c.sources)
 }
 
 // SetInitPodReady is used to safely set initPodReady flag
