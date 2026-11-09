@@ -54,6 +54,16 @@ func (l *SelectorListener) sendObj(event watch.Event, messageLayer messagelayer.
 	}
 	// filter message
 	filterEvent := *(event.DeepCopy())
+	// Stamp the GVK on the private copy BEFORE conversion: the scheme lookup
+	// covers typed cache objects (whose TypeMeta is stripped by informer
+	// decoding), and the object's own GVK is kept for unstructured objects.
+	// Never derive the kind from the resource name heuristically:
+	// UnsafeResourceToKind title-cases only the first letter, turning
+	// ciliumidentities into "Ciliumidentity", which the edge typed clientset
+	// fails to decode.
+	if err := util.SetMetaType(filterEvent.Object); err != nil {
+		klog.V(4).Infof("[dynamiccontroller/selectorListener] set metatype: %v", err)
+	}
 	content, err := convertToUnstructured(filterEvent.Object)
 	if err != nil {
 		klog.Errorf("convertToUnstructured error %v", err)
@@ -86,13 +96,7 @@ func (l *SelectorListener) sendObj(event watch.Event, messageLayer messagelayer.
 		return
 	}
 
-	// Cached informer objects carry an empty TypeMeta (informer decoding
-	// strips apiVersion/kind); the GVK previously reached the message only
-	// as a side effect of objToEvent stamping the *shared* cache object.
-	// Stamp the private body copy from the listener's own GVR so the message
-	// never depends on the cache object state.
 	body := content.DeepCopyObject()
-	body.GetObjectKind().SetGroupVersionKind(l.gvr.GroupVersion().WithKind(kind))
 
 	msg := model.NewMessage("").
 		SetResourceVersion(accessor.GetResourceVersion()).
