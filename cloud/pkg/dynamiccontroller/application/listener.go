@@ -86,10 +86,18 @@ func (l *SelectorListener) sendObj(event watch.Event, messageLayer messagelayer.
 		return
 	}
 
+	// Cached informer objects carry an empty TypeMeta (informer decoding
+	// strips apiVersion/kind); the GVK previously reached the message only
+	// as a side effect of objToEvent stamping the *shared* cache object.
+	// Stamp the private body copy from the listener's own GVR so the message
+	// never depends on the cache object state.
+	body := content.DeepCopyObject()
+	body.GetObjectKind().SetGroupVersionKind(l.gvr.GroupVersion().WithKind(kind))
+
 	msg := model.NewMessage("").
 		SetResourceVersion(accessor.GetResourceVersion()).
 		BuildRouter(modules.DynamicControllerModuleName, constants.GroupResource, resource, operation).
-		FillBody(content.DeepCopyObject())
+		FillBody(body)
 
 	if err := messageLayer.Send(*msg); err != nil {
 		klog.Warningf("send message failed with error: %s, operation: %s, resource: %s", err, msg.GetOperation(), msg.GetResource())

@@ -111,6 +111,13 @@ func (m *MockGenericNamespaceLister) Get(name string) (runtime.Object, error) {
 }
 
 func createTestObject(name string, labels map[string]string) *unstructured.Unstructured {
+	// Unstructured content decoded from JSON only ever contains
+	// map[string]interface{}; a map[string]string would panic in
+	// DeepCopyJSONValue once the object gets deep-copied.
+	labelsMap := make(map[string]interface{}, len(labels))
+	for k, v := range labels {
+		labelsMap[k] = v
+	}
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "apps/v1",
@@ -118,7 +125,7 @@ func createTestObject(name string, labels map[string]string) *unstructured.Unstr
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": "default",
-				"labels":    labels,
+				"labels":    labelsMap,
 			},
 			"spec":   map[string]interface{}{},
 			"status": map[string]interface{}{},

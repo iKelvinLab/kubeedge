@@ -149,13 +149,17 @@ func (c *CommonResourceEventHandler) objToEvent(t watch.EventType, obj interface
 		klog.Warningf("Unknown type: %T, ignore", obj)
 		return
 	}
+	// obj is shared with the informer cache: never mutate it in place.
 	// All obj from client has been removed the information of apiversion/kind called MetaType,
-	// which is fatal to decode the obj as unstructured.Unstructure or unstructured.UnstructureList at edge.
-	err := util.SetMetaType(eventObj)
-	if err != nil {
-		klog.Warningf("Failed to set metatype :%v", err)
+	// which is fatal to decode the obj as unstructured.Unstructure or unstructured.UnstructureList at edge,
+	// so stamp the GVK on a private deep copy that is safe to hand over to
+	// the dispatch goroutine.
+	stamped := util.SetMetaTypeOnCopy(eventObj)
+	if stamped == nil {
+		klog.Warningf("Failed to prepare event object for %v, ignore", t)
+		return
 	}
-	c.events <- watch.Event{Type: t, Object: eventObj}
+	c.events <- watch.Event{Type: t, Object: stamped}
 }
 
 func (c *CommonResourceEventHandler) AddListener(s *SelectorListener) error {
