@@ -6,6 +6,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -123,6 +124,89 @@ func TestSetMetaType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetMetaTypeOnCopy(t *testing.T) {
+	t.Run("typed object: copy stamped, input untouched", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "default"},
+		}
+		got := SetMetaTypeOnCopy(pod)
+		if got == nil {
+			t.Fatal("expected a copy, got nil")
+		}
+		if got == runtime.Object(pod) {
+			t.Error("expected a private deep copy, got the input object")
+		}
+		gvk := got.GetObjectKind().GroupVersionKind()
+		if gvk.Version != "v1" || gvk.Kind != "Pod" {
+			t.Errorf("copy GVK = %q, want v1/Pod", gvk)
+		}
+		if pod.APIVersion != "" || pod.Kind != "" {
+			t.Errorf("input object was mutated: apiVersion=%q kind=%q", pod.APIVersion, pod.Kind)
+		}
+	})
+
+	t.Run("unstructured object: GVK preserved on the copy", func(t *testing.T) {
+		uns := &unstructured.Unstructured{}
+		uns.SetAPIVersion("apps/v1")
+		uns.SetKind("Deployment")
+		uns.SetName("dep1")
+
+		got := SetMetaTypeOnCopy(uns)
+		if got == nil {
+			t.Fatal("expected a copy, got nil")
+		}
+		if got == runtime.Object(uns) {
+			t.Error("expected a private deep copy, got the input object")
+		}
+		gotAccessor, err := meta.Accessor(got)
+		if err != nil {
+			t.Fatalf("meta.Accessor: %v", err)
+		}
+		if gotAccessor.GetName() != "dep1" {
+			t.Errorf("copy name = %q, want dep1", gotAccessor.GetName())
+		}
+		gvk := got.GetObjectKind().GroupVersionKind()
+		if gvk.Group != "apps" || gvk.Version != "v1" || gvk.Kind != "Deployment" {
+			t.Errorf("copy GVK = %q, want apps/v1 Deployment", gvk)
+		}
+	})
+
+	t.Run("unstructured object without kind: no panic, copy returned", func(t *testing.T) {
+		uns := &unstructured.Unstructured{Object: map[string]interface{}{
+			"metadata": map[string]interface{}{"name": "nokind"},
+		}}
+		got := SetMetaTypeOnCopy(uns)
+		if got == nil {
+			t.Fatal("expected a copy even when SetMetaType fails, got nil")
+		}
+		gotAccessor, err := meta.Accessor(got)
+		if err != nil {
+			t.Fatalf("meta.Accessor: %v", err)
+		}
+		if gotAccessor.GetName() != "nokind" {
+			t.Errorf("copy name = %q, want nokind", gotAccessor.GetName())
+		}
+	})
+
+	t.Run("not a runtime.Object: nil", func(t *testing.T) {
+		if got := SetMetaTypeOnCopy("not-an-object"); got != nil {
+			t.Errorf("expected nil, got %T", got)
+		}
+	})
+
+	t.Run("nil object: nil, no panic", func(t *testing.T) {
+		if got := SetMetaTypeOnCopy(nil); got != nil {
+			t.Errorf("expected nil, got %T", got)
+		}
+	})
+
+	t.Run("embedded nil runtime.Object: nil, no panic", func(t *testing.T) {
+		if got := SetMetaTypeOnCopy(struct{ runtime.Object }{}); got != nil {
+			t.Errorf("expected nil, got %T", got)
+		}
+	})
 }
 
 func TestUnsafeKindToResource(t *testing.T) {

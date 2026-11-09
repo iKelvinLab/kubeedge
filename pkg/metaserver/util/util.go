@@ -40,6 +40,32 @@ func SetMetaType(obj runtime.Object) error {
 	return nil
 }
 
+// SetMetaTypeOnCopy returns a deep copy of obj with its GVK set, leaving obj
+// itself untouched, so the copy can be safely shared across goroutines as a
+// beehive message body. Informer cache objects are shared and read-only:
+// SetMetaType mutates its argument and must only ever run on a privately
+// owned object, never on a cache object.
+// It returns nil if obj is not a runtime.Object or carries no object
+// metadata; callers must treat nil as "drop the object".
+func SetMetaTypeOnCopy(obj interface{}) runtime.Object {
+	ro, ok := obj.(runtime.Object)
+	if !ok {
+		klog.Warningf("[metaserver] SetMetaTypeOnCopy: not a runtime.Object: %T", obj)
+		return nil
+	}
+	// Validate BEFORE DeepCopyObject: objects with no object metadata (e.g.
+	// an embedded nil runtime.Object) would panic inside DeepCopyObject.
+	if _, err := meta.Accessor(ro); err != nil {
+		klog.Warningf("[metaserver] SetMetaTypeOnCopy: object has no object metadata: %v", err)
+		return nil
+	}
+	copied := ro.DeepCopyObject()
+	if err := SetMetaType(copied); err != nil {
+		klog.Warningf("[metaserver] SetMetaTypeOnCopy: failed to set metatype: %v", err)
+	}
+	return copied
+}
+
 // Sometimes, we need guess kind according to resource:
 // 1. In most cases, is like pods to Pod,
 // 2. In some unusual cases, requires special treatment like endpoints to Endpoints
