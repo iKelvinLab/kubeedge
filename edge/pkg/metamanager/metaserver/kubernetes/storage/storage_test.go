@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+
 	"encoding/json"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -702,4 +705,60 @@ func (f *fakeRuntimeService) RuntimeConfig(ctx context.Context) (*runtimeapi.Run
 
 func (f *fakeRuntimeService) ImageFsInfo(ctx context.Context) (*runtimeapi.ImageFsInfoResponse, error) {
 	return f.ImageFsInfoF(ctx)
+}
+
+// TestEvictStaleLocalRowOnCloudNotFound pins the read-path reversal (fix
+// topic edge-cache-delete-consistency F3): a definitive cloud 404 evicts the
+// stale local meta_v2 row and passes the error through, while any other
+// error leaves the local cache untouched (edge autonomy fallback).
+func TestEvictStaleLocalRowOnCloudNotFound(t *testing.T) {
+	ctx := request.WithRequestInfo(context.Background(), &request.RequestInfo{
+		IsResourceRequest: true,
+		APIPrefix:         "apis",
+		APIGroup:          "cilium.io",
+		APIVersion:        "v2",
+		Resource:          "ciliumidentities",
+		Namespace:         "default",
+		Name:              "32212",
+	})
+	wantKey := "/cilium.io/v2/ciliumidentities/default/32212"
+
+	original := imitator.DefaultV2Client
+	t.Cleanup(func() { imitator.DefaultV2Client = original })
+
+	t.Run("cloud 404 evicts local row and passes error through", func(t *testing.T) {
+		deletedKeys := make([]string, 0)
+		imitator.DefaultV2Client = fakeclient.Client{
+			DeleteF: func(_ context.Context, key string) error {
+				deletedKeys = append(deletedKeys, key)
+				return nil
+			},
+		}
+		notFound := apierrors.NewNotFound(schema.GroupResource{Group: "cilium.io", Resource: "ciliumidentities"}, "32212")
+		got := evictStaleLocalRow(ctx, notFound)
+		if !apierrors.IsNotFound(got) {
+			t.Errorf("evictStaleLocalRow() returned %v, want the original NotFound", got)
+		}
+		if len(deletedKeys) != 1 || deletedKeys[0] != wantKey {
+			t.Errorf("local eviction = %v, want exactly [%s]", deletedKeys, wantKey)
+		}
+	})
+
+	t.Run("non-NotFound error leaves local row untouched", func(t *testing.T) {
+		deletedKeys := make([]string, 0)
+		imitator.DefaultV2Client = fakeclient.Client{
+			DeleteF: func(_ context.Context, key string) error {
+				deletedKeys = append(deletedKeys, key)
+				return nil
+			},
+		}
+		other := apierrors.NewServerTimeout(schema.GroupResource{Group: "cilium.io", Resource: "ciliumidentities"}, "get", 2)
+		got := evictStaleLocalRow(ctx, other)
+		if got != other {
+			t.Errorf("evictStaleLocalRow() returned %v, want the original error", got)
+		}
+		if len(deletedKeys) != 0 {
+			t.Errorf("local eviction = %v, want none for non-NotFound errors", deletedKeys)
+		}
+	})
 }

@@ -126,6 +126,12 @@ func (r *REST) Get(ctx context.Context, _ string, options *metav1.GetOptions) (r
 
 	// If we get object from cloud failed, try to get the object from the local metaManager
 	if err != nil {
+		// A definitive 404 from the cloud apiserver means the object no longer
+		// exists upstream: evict the stale local row (if any) instead of
+		// serving it, and pass the 404 through unchanged.
+		if errors.IsNotFound(err) {
+			return nil, evictStaleLocalRow(ctx, err)
+		}
 		obj, err = r.Store.Get(ctx, "", options) // name is needless, we get all key information from ctx
 		if err != nil {
 			return nil, errors.NewNotFound(schema.GroupResource{Group: info.APIGroup, Resource: info.Resource}, info.Name)
@@ -133,6 +139,31 @@ func (r *REST) Get(ctx context.Context, _ string, options *metav1.GetOptions) (r
 		klog.Infof("[metaserver/reststorage] successfully process get req (%v) at local", info.Path)
 	}
 	return obj, err
+}
+
+// evictStaleLocalRow deletes the local meta_v2 row for the requested object
+// when the cloud authoritatively reports it as deleted. It always returns the
+// original error so the 404 is passed through to the client unchanged; a
+// failed eviction is only logged and left to the periodic GC backstop. This
+// fixes both the read-path error semantics (no more stale 200 / synthesized
+// NotFound masking the real cloud answer) and reclaims orphaned cache rows.
+func evictStaleLocalRow(ctx context.Context, err error) error {
+	if !errors.IsNotFound(err) {
+		// Nothing authoritative to act on: any other cloud error keeps the
+		// local cache untouched so the caller can fall back to it.
+		return err
+	}
+	key, keyErr := metaserver.KeyFuncReq(ctx, "")
+	if keyErr != nil {
+		klog.Warningf("[metaserver/reststorage] gc-on-read: failed to build meta_v2 key: %v", keyErr)
+		return err
+	}
+	if delErr := imitator.DefaultV2Client.Delete(context.TODO(), key); delErr != nil {
+		klog.Warningf("[metaserver/reststorage] gc-on-read: failed to evict stale local row %s: %v", key, delErr)
+	} else {
+		klog.Infof("[metaserver/reststorage] gc-on-read: cloud reports object deleted, local row evicted: %s", key)
+	}
+	return err
 }
 
 // PassThrough
