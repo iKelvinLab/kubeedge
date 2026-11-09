@@ -25,18 +25,21 @@ import (
 	"testing"
 	"time"
 
-	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
-	"github.com/kubeedge/beehive/pkg/core/model"
 	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
+	"github.com/kubeedge/beehive/pkg/core/model"
+
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/dbclient"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/models"
 )
+
+const logicalTokenKey = "logical-token-key"
 
 var serviceAccountTestDBPath string
 
@@ -108,7 +111,7 @@ func TestServiceAccountTokenKeyFunc(t *testing.T) {
 
 func TestNewestUnexpiredToken(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	key := "logical-token-key"
+	key := logicalTokenKey
 	entries := []models.Meta{
 		{Key: key + "/invalid", Value: "not-json"},
 		{Key: key, Value: marshalTokenRequest(t, "expired", now.Add(-time.Minute))},
@@ -128,7 +131,7 @@ func TestNewestUnexpiredToken(t *testing.T) {
 
 func TestNewestUnexpiredTokenLegacyKey(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	key := "logical-token-key"
+	key := logicalTokenKey
 	entries := []models.Meta{
 		{Key: key, Value: marshalTokenRequest(t, "legacy", now.Add(time.Hour))},
 	}
@@ -144,7 +147,7 @@ func TestNewestUnexpiredTokenLegacyKey(t *testing.T) {
 
 func TestNewestUnexpiredTokenWithoutUsableEntry(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	key := "logical-token-key"
+	key := logicalTokenKey
 	tests := []struct {
 		name    string
 		entries []models.Meta

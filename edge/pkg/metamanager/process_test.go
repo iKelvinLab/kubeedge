@@ -24,11 +24,12 @@ import (
 	"testing"
 	"time"
 
-	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
-	"github.com/kubeedge/beehive/pkg/core/model"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
+	"github.com/kubeedge/beehive/pkg/core/model"
 
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/client"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao"
