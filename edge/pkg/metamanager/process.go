@@ -125,6 +125,41 @@ func msgDebugInfo(message *model.Message) string {
 	return fmt.Sprintf("msgID[%s] resource[%s]", message.GetID(), message.GetResource())
 }
 
+// isCloudDownlink reports whether the message originates from a cloud module.
+// A failed meta_v2 injection of a cloud-downlink message must be fed back as
+// an error response: cloudhub only garbage-collects the ObjectSync accounting
+// after an OK response, so swallowing the error here would acknowledge a
+// delete that never reached meta_v2 and orphan the local row forever.
+func isCloudDownlink(source string) bool {
+	switch source {
+	case cloudmodules.EdgeControllerModuleName,
+		cloudmodules.DynamicControllerModuleName,
+		cloudmodules.PolicyControllerModuleName,
+		cloudmodules.DeviceControllerModuleName:
+		return true
+	}
+	return false
+}
+
+// injectToMetaV2 injects the message into the meta_v2 store. For cloud
+// downlink messages an injection failure blocks the flow (error response, no
+// OK ack, cloudhub retries); for edge-local messages the failure is logged
+// only, to keep local write availability semantics unchanged.
+func injectToMetaV2(message model.Message) error {
+	err := imitator.DefaultV2Client.Inject(message)
+	if err == nil {
+		return nil
+	}
+	if isCloudDownlink(message.GetSource()) {
+		klog.Errorf("failed to inject cloud message into meta_v2, responding error so cloud retries: %s, err: %v",
+			msgDebugInfo(&message), err)
+		return err
+	}
+	klog.Errorf("failed to inject edge-local message into meta_v2, continue: %s, err: %v",
+		msgDebugInfo(&message), err)
+	return nil
+}
+
 func (m *metaManager) handleMessage(message *model.Message) error {
 	resKey, resType, _ := parseResource(message)
 	switch message.GetOperation() {
@@ -198,7 +233,10 @@ func (m *metaManager) processInsert(message model.Message) {
 		sendToCloud(&message)
 		return
 	}
-	imitator.DefaultV2Client.Inject(message)
+	if err := injectToMetaV2(message); err != nil {
+		feedbackError(err, message)
+		return
+	}
 
 	msgSource := message.GetSource()
 	if msgSource == modules.EdgedModuleName {
@@ -232,7 +270,10 @@ func (m *metaManager) processUpdate(message model.Message) {
 		sendToCloud(&message)
 		return
 	}
-	imitator.DefaultV2Client.Inject(message)
+	if err := injectToMetaV2(message); err != nil {
+		feedbackError(err, message)
+		return
+	}
 
 	msgSource := message.GetSource()
 	if msgSource == modules.EdgedModuleName && resType == model.ResourceTypeLease {
@@ -312,7 +353,10 @@ func (m *metaManager) processResponse(message model.Message) {
 }
 
 func (m *metaManager) processDelete(message model.Message) {
-	imitator.DefaultV2Client.Inject(message)
+	if err := injectToMetaV2(message); err != nil {
+		feedbackError(err, message)
+		return
+	}
 	_, resType, _ := parseResource(&message)
 	if resType == model.ResourceTypePod && message.GetSource() == modules.EdgedModuleName {
 		// if pod is deleted in K8s, then a new delete message will be sent to edge

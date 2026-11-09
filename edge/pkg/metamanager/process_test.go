@@ -30,9 +30,13 @@ import (
 
 	edgecorev1alpha2 "github.com/kubeedge/api/apis/componentconfig/edgecore/v1alpha2"
 	"github.com/kubeedge/beehive/pkg/core/model"
+	cloudmodules "github.com/kubeedge/kubeedge/cloud/pkg/common/modules"
 
+	"github.com/kubeedge/kubeedge/edge/pkg/common/modules"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/client"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao"
+	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver/kubernetes/storage/sqlite/imitator"
+	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver/kubernetes/storage/sqlite/imitator/fake"
 )
 
 var metaManagerTestDBPath string
@@ -120,5 +124,61 @@ func TestHandleServiceAccountTokenResponseKeepsGenerations(t *testing.T) {
 		if tokenRequest.Status.Token != wantToken {
 			t.Errorf("cached token %q = %q, want %q", meta.Key, tokenRequest.Status.Token, wantToken)
 		}
+	}
+}
+
+// withFailingInject swaps the global imitator client for one whose Inject
+// always fails, restoring the real client afterwards.
+func withFailingInject(t *testing.T) *bool {
+	t.Helper()
+	original := imitator.DefaultV2Client
+	called := false
+	imitator.DefaultV2Client = fake.Client{
+		InjectF: func(msg model.Message) error {
+			called = true
+			return fmt.Errorf("injected decode failure")
+		},
+	}
+	t.Cleanup(func() { imitator.DefaultV2Client = original })
+	return &called
+}
+
+// TestInjectToMetaV2CloudSourceFailureBlocks pins the atomicity contract: a
+// failed meta_v2 injection of a cloud-downlink message must surface an error
+// so the caller responds with feedbackError (no OK ack), letting cloudhub
+// retry instead of garbage-collecting the ObjectSync accounting for a delete
+// that never reached meta_v2.
+func TestInjectToMetaV2CloudSourceFailureBlocks(t *testing.T) {
+	for _, source := range []string{
+		cloudmodules.EdgeControllerModuleName,
+		cloudmodules.DynamicControllerModuleName,
+		cloudmodules.PolicyControllerModuleName,
+		cloudmodules.DeviceControllerModuleName,
+	} {
+		called := withFailingInject(t)
+		msg := model.NewMessage("").
+			BuildRouter(source, GroupResource, "default/pods/pod-1", model.DeleteOperation).
+			FillBody(map[string]interface{}{})
+		if err := injectToMetaV2(*msg); err == nil {
+			t.Errorf("injectToMetaV2() for cloud source %q: got nil error, want injected error", source)
+		}
+		if !*called {
+			t.Errorf("injectToMetaV2() for cloud source %q: inject was not invoked", source)
+		}
+	}
+}
+
+// TestInjectToMetaV2EdgeLocalSourceFailureContinues keeps local write
+// availability semantics: edge-local messages only log the injection failure.
+func TestInjectToMetaV2EdgeLocalSourceFailureContinues(t *testing.T) {
+	called := withFailingInject(t)
+	msg := model.NewMessage("").
+		BuildRouter(modules.EdgedModuleName, GroupResource, "default/pods/pod-1", model.InsertOperation).
+		FillBody(map[string]interface{}{})
+	if err := injectToMetaV2(*msg); err != nil {
+		t.Errorf("injectToMetaV2() for edge-local source: got error %v, want nil (log and continue)", err)
+	}
+	if !*called {
+		t.Errorf("injectToMetaV2() for edge-local source: inject was not invoked")
 	}
 }
