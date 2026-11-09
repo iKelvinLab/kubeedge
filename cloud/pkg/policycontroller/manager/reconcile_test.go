@@ -2208,7 +2208,9 @@ func TestVisitRulesForSkipsDanglingRoleRef(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(accessScheme).
 		WithObjects(&clusterRole, &danglingCRB, &goodCRB, &role, &danglingRB, &goodRB).Build()
-	ctr := &Controller{Reader: fakeClient}
+	// visitRulesFor lists bindings through the embedded client.Client; the
+	// cross-namespace work evolved the Controller beyond a bare Reader.
+	ctr := &Controller{Client: fakeClient, Reader: fakeClient}
 
 	acc := &policyv1alpha1.ServiceAccountAccess{}
 	ctr.VisitRulesFor(context.Background(), testUser, "ns1", acc)

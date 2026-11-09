@@ -264,7 +264,7 @@ func storeServiceAccountAccess(t *testing.T, access *policyv1alpha1.ServiceAccou
 
 func upsertServiceAccountAccess(t *testing.T, access *policyv1alpha1.ServiceAccountAccess) {
 	t.Helper()
-	dao.Init(serviceAccountTestDBPath, &edgecorev1alpha2.MetaManager{Enable: true})
+	dao.Init("file:serviceaccountaccess-client-test?mode=memory&cache=shared", &edgecorev1alpha2.MetaManager{Enable: true})
 	value, err := json.Marshal(access)
 	if err != nil {
 		t.Fatalf("failed to marshal serviceaccountaccess: %v", err)

@@ -98,7 +98,7 @@ func TestCrossNamespaceServiceAccountAuthorizationFlow(t *testing.T) {
 		t.Fatalf("CloudCore collected rolebinding %#v, want namespace %q and role %q", collected.RoleBinding, targetNamespace, roleName)
 	}
 
-	dao.Init(metaManagerTestDBPath, &edgecorev1alpha2.MetaManager{Enable: true})
+	dao.Init("file:serviceaccountaccess-integration-test?mode=memory&cache=shared", &edgecorev1alpha2.MetaManager{Enable: true})
 	manager := newMetaManager(true)
 	resource := serviceAccountNamespace + "/" + model.ResourceTypeSaAccess + "/" + serviceAccountName
 	t.Cleanup(func() {
