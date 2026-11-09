@@ -1,7 +1,6 @@
 package synccontroller
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
@@ -104,11 +103,13 @@ func (sctl *SyncController) gcOrphanedObjectSync(sync *v1alpha1.ObjectSync) {
 	object.SetKind(sync.Spec.ObjectKind)
 	if msg := buildEdgeControllerMessage(nodeName, sync.Namespace, resourceType, sync.Spec.ObjectName, model.DeleteOperation, object); msg != nil {
 		beehiveContext.Send(commonconst.DefaultContextSendModuleName, *msg)
-	} else {
-		if err := sctl.crdclient.ReliablesyncsV1alpha1().ObjectSyncs(sync.Namespace).Delete(context.Background(), sync.Name, *metav1.NewDeleteOptions(0)); err != nil {
-			klog.Errorf("Failed to delete objectsync %s: %v", sync.Name, err)
-		}
+		return
 	}
+	// Message build failed: keep the ObjectSync so the next 5s reconcile
+	// re-attempts the delete. Deleting the accounting here would tell the
+	// edge nothing while destroying the only channel that can still
+	// propagate the deletion (permanent orphan row).
+	klog.Warningf("failed to build delete message for orphaned objectSync %s, will retry in next sync loop", sync.Name)
 }
 
 func sendEvents(nodeName string, sync *v1alpha1.ObjectSync, resourceType string,

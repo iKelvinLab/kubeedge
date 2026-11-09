@@ -17,6 +17,7 @@ limitations under the License.
 package synccontroller
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 
 	"github.com/kubeedge/api/apis/reliablesyncs/v1alpha1"
+	crdfake "github.com/kubeedge/api/client/clientset/versioned/fake"
 	"github.com/kubeedge/beehive/pkg/common"
 	beehiveContext "github.com/kubeedge/beehive/pkg/core/context"
 	"github.com/kubeedge/beehive/pkg/core/model"
@@ -250,5 +252,47 @@ func TestManageObjectSync(t *testing.T) {
 				t.Errorf("manageObjectSyncs() = %v, want %v", message.GetOperation(), tt.ExpectedOperation)
 			}
 		})
+	}
+}
+
+// TestGCOrphanedObjectSyncKeepsAccountingOnBuildFailure pins the fix for the
+// orphaned-accounting path: when the delete message cannot be built (e.g.
+// malformed ObjectSync with empty namespace), the ObjectSync must be kept so
+// the next 5s reconcile re-attempts the delete. Deleting the accounting here
+// would orphan the edge row forever (no channel left to propagate it).
+func TestGCOrphanedObjectSyncKeepsAccountingOnBuildFailure(t *testing.T) {
+	crdClient := crdfake.NewSimpleClientset()
+	sync := &v1alpha1.ObjectSync{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: tf.TestNamespace,
+			Name:      tf.TestNodeID + "." + tf.TestPodUID,
+		},
+		Spec: v1alpha1.ObjectSyncSpec{
+			ObjectAPIVersion: "v1",
+			ObjectKind:       "Pod",
+			ObjectName:       tf.TestPodName,
+		},
+	}
+	if _, err := crdClient.ReliablesyncsV1alpha1().ObjectSyncs(tf.TestNamespace).
+		Create(context.Background(), sync, v1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create ObjectSync: %v", err)
+	}
+
+	testController := newSyncController(true)
+	testController.crdclient = crdClient
+
+	// Empty namespace makes messagelayer.BuildResource fail, so the delete
+	// message cannot be built.
+	buildBroken := sync.DeepCopy()
+	buildBroken.Namespace = ""
+	testController.gcOrphanedObjectSync(buildBroken)
+
+	got, err := crdClient.ReliablesyncsV1alpha1().ObjectSyncs(tf.TestNamespace).
+		Get(context.Background(), sync.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("ObjectSync accounting was destroyed on message build failure: %v", err)
+	}
+	if got.Name != sync.Name {
+		t.Fatalf("unexpected ObjectSync %q, want %q", got.Name, sync.Name)
 	}
 }
