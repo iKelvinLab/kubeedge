@@ -157,6 +157,10 @@ func (sctl *SyncController) reconcileClusterObjectSyncs() {
 }
 
 func (sctl *SyncController) deleteObjectSyncs() {
+	if !sctl.informersSynced() {
+		klog.Warning("skip deleting ObjectSyncs: informers not synced yet")
+		return
+	}
 	syncs, err := sctl.objectSyncLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("Failed to list all the ObjectSyncs: %v", err)
@@ -191,6 +195,10 @@ func (sctl *SyncController) deleteObjectSyncs() {
 }
 
 func (sctl *SyncController) deleteClusterObjectSyncs() {
+	if !sctl.informersSynced() {
+		klog.Warning("skip deleting ClusterObjectSyncs: informers not synced yet")
+		return
+	}
 	syncs, err := sctl.clusterObjectSyncLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("Failed to list all the clusterObjectSync: %v", err)
@@ -225,6 +233,20 @@ func (sctl *SyncController) deleteClusterObjectSyncs() {
 }
 
 // checkObjectSync checks whether objectSync is outdated
+// informersSynced reports whether all informers feeding the sync controller
+// (objectSync/clusterObjectSync/node) have completed their initial sync.
+// The node-delete event handler can fire before the initial list is done; a
+// half-synced node lister would then report every node as missing and wipe
+// the accounting of all nodes at once.
+func (sctl *SyncController) informersSynced() bool {
+	for _, hasSynced := range sctl.informersSyncedFuncs {
+		if !hasSynced() {
+			return false
+		}
+	}
+	return true
+}
+
 func (sctl *SyncController) checkObjectSync(sync *v1alpha1.ObjectSync) (bool, error) {
 	nodeName := getNodeName(sync.Name)
 	_, err := sctl.nodeLister.Get(nodeName)

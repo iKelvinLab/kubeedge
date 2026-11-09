@@ -207,6 +207,13 @@ func TestDeleteObjectSyncs(t *testing.T) {
 			client := fake.NewSimpleClientset()
 			informers := informers.NewSharedInformerFactory(client, 0)
 			testController := newSyncController(true)
+			// The guard added in deleteObjectSyncs skips deletion while the
+			// real global informers are unsynced; declare them synced so the
+			// test exercises the deletion path itself.
+			testController.informersSyncedFuncs = testController.informersSyncedFuncs[:0]
+			testController.informersSyncedFuncs = append(testController.informersSyncedFuncs, func() bool {
+				return true
+			})
 			testController.nodeLister = informers.Core().V1().Nodes().Lister()
 			testController.crdclient = crdClient
 			testController.objectSyncLister = crdInformers.Reliablesyncs().V1alpha1().ObjectSyncs().Lister()
