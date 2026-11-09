@@ -98,6 +98,10 @@ func (sctl *SyncController) gcOrphanedObjectSync(sync *v1alpha1.ObjectSync) {
 	object.SetNamespace(sync.Namespace)
 	object.SetName(sync.Spec.ObjectName)
 	object.SetUID(types.UID(getObjectUID(sync.Name)))
+	// The edge decodes the delete stub through its apiVersion/kind; without
+	// them the delete is silently dropped at the edge.
+	object.SetAPIVersion(sync.Spec.ObjectAPIVersion)
+	object.SetKind(sync.Spec.ObjectKind)
 	if msg := buildEdgeControllerMessage(nodeName, sync.Namespace, resourceType, sync.Spec.ObjectName, model.DeleteOperation, object); msg != nil {
 		beehiveContext.Send(commonconst.DefaultContextSendModuleName, *msg)
 	} else {
@@ -118,6 +122,9 @@ func sendEvents(nodeName string, sync *v1alpha1.ObjectSync, resourceType string,
 		// trigger the update event
 		klog.V(4).Infof("The resourceVersion: %s of %s in K8s is greater than in edgenode: %s, send the update event", objectResourceVersion, resourceType, sync.Status.ObjectResourceVersion)
 		msg := buildEdgeControllerMessage(nodeName, sync.Namespace, resourceType, sync.Spec.ObjectName, model.UpdateOperation, obj)
+		if msg == nil {
+			return
+		}
 		beehiveContext.Send(commonconst.DefaultContextSendModuleName, *msg)
 	}
 }
@@ -129,12 +136,20 @@ func buildEdgeControllerMessage(nodeName, namespace, resourceType, resourceName,
 		return nil
 	}
 
-	resourceVersion := GetObjectResourceVersion(obj)
+	// Informer cache objects are shared read-only: send a private deep copy
+	// with the GVK stamped on it. The edge decodes unstructured bodies
+	// through their in-body apiVersion/kind, and in-place stamping of the
+	// cache object caused the concurrent map read/write panic.
+	body := util.SetMetaTypeOnCopy(obj)
+	if body == nil {
+		klog.Errorf("failed to build message body for resource %s/%s", resourceType, resourceName)
+		return nil
+	}
 
 	msg := model.NewMessage("").
 		BuildRouter(modules.EdgeControllerModuleName, edgectrconst.GroupResource, resource, operationType).
-		FillBody(obj).
-		SetResourceVersion(resourceVersion)
+		FillBody(body).
+		SetResourceVersion(GetObjectResourceVersion(body))
 
 	return msg
 }

@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -101,6 +100,10 @@ func (sctl *SyncController) gcOrphanedClusterObjectSyncImpl(sync *v1alpha1.Clust
 	object := &unstructured.Unstructured{}
 	object.SetName(sync.Spec.ObjectName)
 	object.SetUID(types.UID(getObjectUIDFunc(sync.Name)))
+	// The edge decodes the delete stub through its apiVersion/kind; without
+	// them the delete is silently dropped at the edge.
+	object.SetAPIVersion(sync.Spec.ObjectAPIVersion)
+	object.SetKind(sync.Spec.ObjectKind)
 	if msg := buildEdgeControllerMessageFunc(nodeName, models.NullNamespace, resourceType, sync.Spec.ObjectName, model.DeleteOperation, object); msg != nil {
 		sendToEdge(commonconst.DefaultContextSendModuleName, *msg)
 	} else {
@@ -112,11 +115,6 @@ func (sctl *SyncController) gcOrphanedClusterObjectSyncImpl(sync *v1alpha1.Clust
 
 func sendClusterObjectSyncEvent(nodeName string, sync *v1alpha1.ClusterObjectSync, resourceType string,
 	objectResourceVersion string, obj interface{}) {
-	runtimeObj := obj.(runtime.Object)
-	if err := util.SetMetaType(runtimeObj); err != nil {
-		klog.Warningf("failed to set metatype :%v", err)
-	}
-
 	if sync.Status.ObjectResourceVersion == "" {
 		klog.Errorf("The ObjectResourceVersion is empty in status of clusterObjectSync: %s", sync.Name)
 		return
@@ -125,7 +123,13 @@ func sendClusterObjectSyncEvent(nodeName string, sync *v1alpha1.ClusterObjectSyn
 	if compareResourceVersionFunc(objectResourceVersion, sync.Status.ObjectResourceVersion) > 0 {
 		// trigger the update event
 		klog.V(4).Infof("The resourceVersion: %s of %s in K8s is greater than in edgenode: %s, send the update event", objectResourceVersion, resourceType, sync.Status.ObjectResourceVersion)
+		// The GVK is stamped by buildEdgeControllerMessage on a private deep
+		// copy of obj; stamping the shared informer cache object in place
+		// here caused the concurrent map read/write panic.
 		msg := buildEdgeControllerMessageFunc(nodeName, models.NullNamespace, resourceType, sync.Spec.ObjectName, model.UpdateOperation, obj)
+		if msg == nil {
+			return
+		}
 		sendToEdge(commonconst.DefaultContextSendModuleName, *msg)
 	}
 }
