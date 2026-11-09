@@ -12,9 +12,10 @@ import (
 
 // Client fake
 type Client struct {
-	InjectF                       func(msg model.Message)
+	InjectF                       func(msg model.Message) error
 	InsertOrUpdateObjF            func(ctx context.Context, obj runtime.Object) error
 	DeleteObjF                    func(ctx context.Context, obj runtime.Object) error
+	DeleteF                       func(ctx context.Context, key string) error
 	InsertOrUpdatePassThroughObjF func(ctx context.Context, obj []byte, key string) error
 	GetPassThroughObjF            func(ctx context.Context, key string) ([]byte, error)
 	GetRevisionF                  func() uint64
@@ -25,8 +26,8 @@ type Client struct {
 }
 
 // Inject fake
-func (c Client) Inject(msg model.Message) {
-	c.InjectF(msg)
+func (c Client) Inject(msg model.Message) error {
+	return c.InjectF(msg)
 }
 
 // InsertOrUpdateObj fake
@@ -37,6 +38,11 @@ func (c Client) InsertOrUpdateObj(ctx context.Context, obj runtime.Object) error
 // DeleteObj fake
 func (c Client) DeleteObj(ctx context.Context, obj runtime.Object) error {
 	return c.DeleteObjF(ctx, obj)
+}
+
+// Delete fake
+func (c Client) Delete(ctx context.Context, key string) error {
+	return c.DeleteF(ctx, key)
 }
 
 // InsertOrUpdatePassThroughObj fake

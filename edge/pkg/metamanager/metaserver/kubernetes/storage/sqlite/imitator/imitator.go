@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -37,9 +38,19 @@ type imitator struct {
 }
 
 // Inject transform the message to watch.event, save internal obj/objs to table meta_v2
-// and trigger the corresponding hook to serve watch
-func (s *imitator) Inject(msg model.Message) {
-	for _, e := range s.Event(&msg) {
+// and trigger the corresponding hook to serve watch.
+// It returns an error when the message cannot be decoded or any event fails to
+// be persisted, so the caller can withhold the ack for cloud-originated
+// messages: without this, a silently dropped delete would be acknowledged, the
+// cloud would garbage-collect the ObjectSync accounting, and the local row
+// would become a permanent orphan.
+func (s *imitator) Inject(msg model.Message) error {
+	events, err := s.Event(&msg)
+	if err != nil {
+		return fmt.Errorf("failed to transform message into watch events: %w", err)
+	}
+	var errs []error
+	for _, e := range events {
 		// save to meta_v2
 		var err error
 		switch e.Type {
@@ -50,12 +61,14 @@ func (s *imitator) Inject(msg model.Message) {
 		}
 		if err != nil {
 			key := metaserver.KeyFunc(e.Object)
-			klog.Errorf("failed to serve event {type:%v,key:%v}", e.Type, key)
+			klog.Errorf("failed to serve event {type:%v,key:%v}, err: %v", e.Type, key, err)
+			errs = append(errs, err)
 			continue
 		}
 		// TODO: move Trigger inside InsertOrUpdateObj and DeleteObj
 		watchhook.Trigger(e)
 	}
+	return errors.Join(errs...)
 }
 
 // TODO: filter out insert or update req that the obj's rev is smaller than the stored
@@ -218,15 +231,18 @@ func (s *imitator) Watch(ctx context.Context, key string, rev uint64) <-chan wat
 	return wch
 }
 
-// Event transform the message to watch.event
-func (s *imitator) Event(msg *model.Message) []watch.Event {
+// Event transform the message to watch.event.
+// A decode failure is returned as an error instead of being silently
+// swallowed: bodies without apiVersion/kind (e.g. legacy delete stubs)
+// cannot be keyed into meta_v2 and must be surfaced to the caller.
+func (s *imitator) Event(msg *model.Message) ([]watch.Event, error) {
 	klog.V(4).Infof("[metaserver] get a message from metamanager: %+v", msg)
 	var ret []watch.Event
 	_, resType, _ := parseResource(msg.Router.Resource)
 	//skip nodestatus, podstatus and node-lease
 	if strings.Contains(resType, "status") || (strings.Contains(resType, "lease") && msg.GetSource() == modules.EdgedModuleName) {
 		klog.V(4).Infof("skip status or node-lease messages")
-		return []watch.Event{}
+		return []watch.Event{}, nil
 	}
 	var bytes []byte
 	var err error
@@ -239,7 +255,7 @@ func (s *imitator) Event(msg *model.Message) []watch.Event {
 		bytes, err = json.Marshal(body)
 		if err != nil {
 			klog.Errorf("failed to marshal msg content, err: %+v", err)
-			return ret
+			return ret, err
 		}
 	}
 	var op watch.EventType
@@ -256,7 +272,7 @@ func (s *imitator) Event(msg *model.Message) []watch.Event {
 	err = runtime.DecodeInto(s.codec, bytes, obj)
 	if err != nil {
 		klog.Errorf("failed to unmarshal message content to unstructured obj: %+v", err)
-		return ret
+		return ret, fmt.Errorf("failed to decode message content to unstructured obj: %w", err)
 	}
 	if obj.IsList() {
 		fn := func(object runtime.Object) error {
@@ -270,12 +286,12 @@ func (s *imitator) Event(msg *model.Message) []watch.Event {
 		err := obj.EachListItem(fn)
 		if err != nil {
 			klog.Errorf("failed to get ret list, err: %+v", err)
-			return ret
+			return ret, fmt.Errorf("failed to iterate list items: %w", err)
 		}
 	} else {
 		ret = append(ret, watch.Event{Type: op, Object: obj})
 	}
-	return ret
+	return ret, nil
 }
 
 // Resource format: <namespace>/<restype>[/resid]

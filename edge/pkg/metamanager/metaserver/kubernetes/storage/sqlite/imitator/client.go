@@ -24,10 +24,15 @@ var Versioner = storage.APIObjectVersioner{}
 
 type Client interface {
 	// This set of functions is for metamanager
-	// Inject the msg to the backend storage
-	Inject(msg model.Message)
+	// Inject the msg to the backend storage. It returns an error when the
+	// message cannot be decoded or persisted, so callers can withhold the
+	// cloud ack and let cloudhub retry the message instead of silently
+	// losing it (and garbage-collecting the ObjectSync accounting).
+	Inject(msg model.Message) error
 	InsertOrUpdateObj(ctx context.Context, obj runtime.Object) error
 	DeleteObj(ctx context.Context, obj runtime.Object) error
+	// Delete removes the row by its meta_v2 storage key (idempotent).
+	Delete(ctx context.Context, key string) error
 	InsertOrUpdatePassThroughObj(ctx context.Context, obj []byte, key string) error
 	GetPassThroughObj(ctx context.Context, key string) ([]byte, error)
 
