@@ -70,6 +70,16 @@ func setupControllers(ctx context.Context, mgr manager.Manager) error {
 	if err := pc.SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("failed to setup nodegroup controller, %v", err)
 	}
+
+	// Periodically re-push every ServiceAccountAccess to its recorded nodes:
+	// the reconcile path only sends on cloud-side changes, so an edge node
+	// that lost its local sa-access row would never receive the record again.
+	if err := mgr.Add(&pm.SaAccessResyncRunner{
+		Reader:       mgr.GetClient(),
+		MessageLayer: messagelayer.PolicyControllerMessageLayer(),
+	}); err != nil {
+		return fmt.Errorf("failed to add sa-access resync runner, %v", err)
+	}
 	return nil
 }
 
