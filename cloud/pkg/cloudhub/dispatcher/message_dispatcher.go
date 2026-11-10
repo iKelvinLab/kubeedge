@@ -262,10 +262,13 @@ func (md *messageDispatcher) enqueueAckMessage(nodeID string, msg *beehivemodel.
 	item, exist, _ := nodeStore.GetByKey(messageKey)
 	if exist {
 		msgInStore := item.(*beehivemodel.Message)
-		if isDeleteMessage(msgInStore) ||
-			synccontroller.CompareResourceVersion(msg.GetResourceVersion(), msgInStore.GetResourceVersion()) <= 0 {
+		cmp := synccontroller.CompareResourceVersion(msg.GetResourceVersion(), msgInStore.GetResourceVersion())
+		if isDeleteMessage(msgInStore) || cmp < 0 || (cmp == 0 && !isResyncMessage(msg)) {
 			// If the message resource version is older than the message in store or the operation
 			// for the message in store is delete, The message will be discarded directly.
+			// Same-RV resync-stamped messages are admitted: the store entry of an
+			// acked update is never removed, so without this exemption every
+			// periodic re-push after the first would be dropped here.
 			return
 		}
 		shouldEnqueue = true

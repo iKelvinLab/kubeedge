@@ -170,6 +170,7 @@ func TestEnqueueAckMessage(t *testing.T) {
 	resyncSameRVMsg.SetType(beehivemodel.MessageTypeResync)
 	resyncOlderRVMsg := tf.NewPodMessage(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "0"), "update")
 	resyncOlderRVMsg.SetType(beehivemodel.MessageTypeResync)
+	plainSameRVMsg := tf.NewPodMessage(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "update")
 
 	tests := []tf.TestCase{
 		{
@@ -331,6 +332,35 @@ func TestEnqueueAckMessage(t *testing.T) {
 				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
 			},
 			ExpectedStoreMessage: nil,
+		},
+		{
+			// The store entry of an acked update is never removed, so the
+			// same-RV periodic re-push must be admitted at the store layer
+			// too, replacing the stored message.
+			Name:               "resync same-RV message replaces stored message",
+			InitialObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ReactorErrors:        tf.NoErrors,
+			InitialMessages:      []*beehivemodel.Message{normalMsg1},
+			CurrentArriveMessage: resyncSameRVMsg,
+			ExpectedObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ExpectedStoreMessage: resyncSameRVMsg,
+		},
+		{
+			Name: "plain same-RV message still dropped at store layer",
+			InitialObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ReactorErrors:        tf.NoErrors,
+			InitialMessages:      []*beehivemodel.Message{normalMsg1},
+			CurrentArriveMessage: plainSameRVMsg,
+			ExpectedObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ExpectedStoreMessage: normalMsg1,
 		},
 	}
 
