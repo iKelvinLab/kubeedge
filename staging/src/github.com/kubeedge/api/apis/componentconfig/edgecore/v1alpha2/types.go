@@ -1035,6 +1035,16 @@ type MetaServer struct {
 	// DummyServer defines the IP address of dummy interface and port
 	// that MetaServer listen on for edge pods to connect, format: ip:port
 	DummyServer string `json:"dummyServer"`
+	// GCInterval controls how often the edge reconciles its local meta_v2
+	// cache against the cloud: per GVR the cloud is LISTed and local rows whose
+	// object no longer exists upstream are deleted (a Deleted event is
+	// synthesized to local watchers). This is the backstop for deletes whose
+	// reliable-sync accounting was already garbage-collected.
+	// Zero disables the reconciliation. default 10m
+	GCInterval metav1.Duration `json:"gcInterval,omitempty"`
+	// GCDryRun makes the meta_v2 GC only log the rows it would delete,
+	// for first-rollout observation. default false
+	GCDryRun bool `json:"gcDryRun,omitempty"`
 }
 
 // ServiceBus indicates the ServiceBus module config

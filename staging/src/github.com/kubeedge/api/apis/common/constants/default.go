@@ -35,6 +35,9 @@ const (
 	DefaultRemoteQueryTimeout = 60
 	DefaultMetaServerAddr     = "127.0.0.1:10550"
 	DefaultDummyServerAddr    = "169.254.30.10:10550"
+	// DefaultMetaServerGCInterval is the default interval for the edge-side
+	// meta_v2 reconciliation against the cloud (edge-cache-delete-consistency).
+	DefaultMetaServerGCInterval = 10 * time.Minute
 
 	// Config
 	DefaultKubeContentType = "application/vnd.kubernetes.protobuf"

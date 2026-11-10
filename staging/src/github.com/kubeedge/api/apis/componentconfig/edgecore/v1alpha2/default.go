@@ -131,6 +131,7 @@ func NewDefaultEdgeCoreConfig() (config *EdgeCoreConfig) {
 					TLSPrivateKeyFile:     constants.DefaultKeyFile,
 					ServiceAccountIssuers: []string{constants.DefaultServiceAccountIssuer},
 					DummyServer:           constants.DefaultDummyServerAddr,
+					GCInterval:            metav1.Duration{Duration: constants.DefaultMetaServerGCInterval},
 				},
 			},
 			ServiceBus: &ServiceBus{
