@@ -38,6 +38,7 @@ import (
 	apirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/klog/v2"
 
+	connect "github.com/kubeedge/kubeedge/edge/pkg/common/cloudconnection"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/dbclient"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/models"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver/agent"
@@ -255,5 +256,13 @@ func Run(done <-chan struct{}, interval time.Duration, dryRun bool) {
 	}
 	g := NewGC(agentCloudLister{}, metaV2RowStore{}, dryRun, watchhook.Trigger)
 	klog.Infof("[meta_v2 gc] starting edge cache reconciliation against cloud, interval=%v dryRun=%v", interval, dryRun)
-	wait.Until(func() { g.ReconcileOnce(context.TODO()) }, interval, done)
+	wait.Until(func() {
+		// The first pass races edgehub's reconnect on startup; skip the
+		// whole round with a single line instead of one skip log per GVR.
+		if !connect.IsConnected() {
+			klog.Infof("[meta_v2 gc] cloud connection not ready, skip this round")
+			return
+		}
+		g.ReconcileOnce(context.TODO())
+	}, interval, done)
 }
