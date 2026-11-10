@@ -31,10 +31,17 @@ func TestListGVRs(t *testing.T) {
 	dao.Init(filepath.Join(t.TempDir(), "meta.db"), &edgecorev1alpha2.MetaManager{Enable: true})
 	svc := NewMetaV2Service()
 
+	grouped := schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumidentities"}
+	core := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	// Seed with REAL gvr.String() products — the production writer
+	// (imitator.InsertOrUpdateObj) stores gvr.String(), whose format is
+	// "group/version, Resource=resource" (or "version, Resource=resource"
+	// for core). An earlier version of this test hand-wrote slash-separated
+	// triplets, matched the buggy parser, and missed the bug entirely.
 	seed := []models.MetaV2{
-		{Key: "/cilium.io/v2/ciliumidentities/null/1", GroupVersionResource: "cilium.io/v2/ciliumidentities", Namespace: models.NullNamespace, Name: "1"},
-		{Key: "/cilium.io/v2/ciliumidentities/null/2", GroupVersionResource: "cilium.io/v2/ciliumidentities", Namespace: models.NullNamespace, Name: "2"},
-		{Key: "/core/v1/pods/default/p", GroupVersionResource: "v1/pods", Namespace: "default", Name: "p"},
+		{Key: "/cilium.io/v2/ciliumidentities/null/1", GroupVersionResource: grouped.String(), Namespace: models.NullNamespace, Name: "1"},
+		{Key: "/cilium.io/v2/ciliumidentities/null/2", GroupVersionResource: grouped.String(), Namespace: models.NullNamespace, Name: "2"},
+		{Key: "/core/v1/pods/default/p", GroupVersionResource: core.String(), Namespace: "default", Name: "p"},
 		// pass-through rows carry no GVR and must be excluded
 		{Key: "/version", GroupVersionResource: "", Namespace: "", Name: ""},
 		// unparsable GVR strings are skipped, not fatal
@@ -52,8 +59,8 @@ func TestListGVRs(t *testing.T) {
 	}
 
 	want := map[schema.GroupVersionResource]bool{
-		{Group: "cilium.io", Version: "v2", Resource: "ciliumidentities"}: false,
-		{Version: "v1", Resource: "pods"}:                                false,
+		grouped: false,
+		core:    false,
 	}
 	for _, gvr := range gvrs {
 		if _, ok := want[gvr]; !ok {
