@@ -9,6 +9,7 @@ import (
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/client"
 	metamanagerconfig "github.com/kubeedge/kubeedge/edge/pkg/metamanager/config"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/dbclient"
+	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/gc"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver"
 	metaserverconfig "github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver/config"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/metaserver/kubernetes/storage/sqlite/imitator"
@@ -62,6 +63,11 @@ func (m *metaManager) Start() {
 	if metaserverconfig.Config.Enable {
 		imitator.StorageInit()
 		go metaserver.NewMetaServer().Start(beehiveContext.Done())
+		// Edge-side meta_v2 reconciliation against the cloud: reclaims
+		// orphaned rows whose reliable-sync accounting is already gone.
+		go gc.Run(beehiveContext.Done(),
+			metaserverconfig.Config.GCInterval.Duration,
+			metaserverconfig.Config.GCDryRun)
 	}
 
 	go client.RunExpiredTokenGC(beehiveContext.Done())
