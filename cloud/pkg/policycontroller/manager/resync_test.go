@@ -76,6 +76,9 @@ func TestSaAccessResyncAll(t *testing.T) {
 		if got := msg.GetOperation(); got != model.UpdateOperation {
 			t.Errorf("message operation = %q, want %q", got, model.UpdateOperation)
 		}
+		if got := msg.GetType(); got != model.MessageTypeResync {
+			t.Errorf("message type = %q, want %q", got, model.MessageTypeResync)
+		}
 		acc, ok := msg.GetContent().(*policyv1alpha1.ServiceAccountAccess)
 		if !ok {
 			t.Fatalf("message content type = %T, want *policyv1alpha1.ServiceAccountAccess", msg.GetContent())

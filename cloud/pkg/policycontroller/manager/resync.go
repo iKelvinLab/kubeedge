@@ -51,7 +51,7 @@ func (r *SaAccessResyncRunner) resyncAll() {
 		if !acc.GetDeletionTimestamp().IsZero() || len(acc.Status.NodeList) == 0 {
 			continue
 		}
-		sendSaAccess2Edge(r.MessageLayer, acc, acc.Status.NodeList, model.UpdateOperation)
+		sendSaAccess2Edge(r.MessageLayer, acc, acc.Status.NodeList, model.UpdateOperation, true)
 		klog.V(4).Infof("[sa-access resync] pushed serviceaccountaccess %s/%s to %d nodes",
 			acc.Namespace, acc.Name, len(acc.Status.NodeList))
 	}

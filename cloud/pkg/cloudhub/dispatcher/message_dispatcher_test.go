@@ -166,6 +166,10 @@ func TestEnqueueAckMessage(t *testing.T) {
 	repairedObjectSync := legacyObjectSync.DeepCopy()
 	repairedObjectSync.Spec.ObjectAPIVersion = "v1"
 	repairedObjectSync.Spec.ObjectKind = "Pod"
+	resyncSameRVMsg := tf.NewPodMessage(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "update")
+	resyncSameRVMsg.SetType(beehivemodel.MessageTypeResync)
+	resyncOlderRVMsg := tf.NewPodMessage(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "0"), "update")
+	resyncOlderRVMsg.SetType(beehivemodel.MessageTypeResync)
 
 	tests := []tf.TestCase{
 		{
@@ -301,6 +305,32 @@ func TestEnqueueAckMessage(t *testing.T) {
 				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestDiffPodUID, "0"), "Pod"),
 			},
 			ExpectedStoreMessage: normalMsg3,
+		},
+		{
+			Name: "resync message with same RV arrives and passes gate",
+			InitialObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ReactorErrors:        tf.NoErrors,
+			InitialMessages:      []*beehivemodel.Message{},
+			CurrentArriveMessage: resyncSameRVMsg,
+			ExpectedObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ExpectedStoreMessage: resyncSameRVMsg,
+		},
+		{
+			Name: "resync message with older RV arrives and is dropped (rollback prevented)",
+			InitialObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ReactorErrors:        tf.NoErrors,
+			InitialMessages:      []*beehivemodel.Message{},
+			CurrentArriveMessage: resyncOlderRVMsg,
+			ExpectedObjectSyncs: []*v1alpha1.ObjectSync{
+				tf.NewObjectSync(tf.NewTestPodResource(tf.TestPodName, tf.TestPodUID, "1"), "Pod"),
+			},
+			ExpectedStoreMessage: nil,
 		},
 	}
 

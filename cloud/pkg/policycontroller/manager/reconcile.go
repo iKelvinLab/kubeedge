@@ -327,16 +327,19 @@ func subtractSlice(source, subTarget []string) []string {
 }
 
 func (c *Controller) send2Edge(acc *policyv1alpha1.ServiceAccountAccess, targets []string, opr string) {
-	sendSaAccess2Edge(c.MessageLayer, acc, targets, opr)
+	sendSaAccess2Edge(c.MessageLayer, acc, targets, opr, false)
 }
 
 // sendSaAccess2Edge pushes the given ServiceAccountAccess to the target
 // nodes. It is shared by the event-driven reconcile path and the periodic
-// resync runner. Send failures are logged only: the resync runner retries on
-// its next round, and the reconcile path is re-triggered by watch events.
-func sendSaAccess2Edge(layer messagelayer.MessageLayer, acc *policyv1alpha1.ServiceAccountAccess, targets []string, opr string) {
-	klog.V(4).Infof("send2Edge for serviceaccount %s/%s: %v (%s)",
-		acc.Namespace, acc.Spec.ServiceAccount.Name, targets, opr)
+// resync runner. When isResync is true, the message is stamped with
+// model.MessageTypeResync so CloudHub's reliable-sync gate permits same-RV
+// re-pushes for edge-side compensation while continuing to reject older versions.
+// Send failures are logged only: the resync runner retries on its next round,
+// and the reconcile path is re-triggered by watch events.
+func sendSaAccess2Edge(layer messagelayer.MessageLayer, acc *policyv1alpha1.ServiceAccountAccess, targets []string, opr string, isResync bool) {
+	klog.V(4).Infof("send2Edge for serviceaccount %s/%s: %v (%s, resync=%t)",
+		acc.Namespace, acc.Spec.ServiceAccount.Name, targets, opr, isResync)
 	sendObj := acc.DeepCopy()
 	sendObj.SetGroupVersionKind(policyv1alpha1.SchemeGroupVersion.WithKind("ServiceAccountAccess"))
 	for _, node := range targets {
@@ -350,6 +353,9 @@ func sendSaAccess2Edge(layer messagelayer.MessageLayer, acc *policyv1alpha1.Serv
 		msg := model.NewMessage("").
 			SetResourceVersion(sendObj.ResourceVersion).
 			FillBody(sendObj).BuildRouter(modules.PolicyControllerModuleName, constants.GroupResource, resource, opr)
+		if isResync {
+			msg.SetType(model.MessageTypeResync)
+		}
 		if err := layer.Send(*msg); err != nil {
 			klog.Warningf("send message %s failed with error: %s", resource, err)
 			continue

@@ -295,7 +295,8 @@ func (md *messageDispatcher) enqueueNonNamespacedResource(nodeID string, msg *be
 
 	switch {
 	case err == nil && clusterObjectSync.Status.ObjectResourceVersion != "":
-		if synccontroller.CompareResourceVersion(msg.GetResourceVersion(), clusterObjectSync.Status.ObjectResourceVersion) > 0 {
+		cmp := synccontroller.CompareResourceVersion(msg.GetResourceVersion(), clusterObjectSync.Status.ObjectResourceVersion)
+		if cmp > 0 || (cmp == 0 && isResyncMessage(msg)) {
 			return true
 		}
 
@@ -367,7 +368,8 @@ func (md *messageDispatcher) enqueueNamespacedResource(nodeID string, msg *beehi
 
 	switch {
 	case err == nil && objectSync.Status.ObjectResourceVersion != "":
-		if synccontroller.CompareResourceVersion(msg.GetResourceVersion(), objectSync.Status.ObjectResourceVersion) > 0 {
+		cmp := synccontroller.CompareResourceVersion(msg.GetResourceVersion(), objectSync.Status.ObjectResourceVersion)
+		if cmp > 0 || (cmp == 0 && isResyncMessage(msg)) {
 			return true
 		}
 
@@ -530,6 +532,15 @@ func isVolumeOperation(op string) bool {
 		op == commonconst.CSIOperationTypeDeleteVolume ||
 		op == commonconst.CSIOperationTypeControllerPublishVolume ||
 		op == commonconst.CSIOperationTypeControllerUnpublishVolume
+}
+
+// isResyncMessage reports whether the message represents a periodic resync
+// intended to compensate for edge-side record loss. CloudHub permits same-RV
+// resync messages to pass the reliable-sync gate (cmp == 0) so the edge
+// receives the row without needing a cloud-side CR change, while continuing
+// to reject older versions (cmp < 0) to prevent state rollback.
+func isResyncMessage(msg *beehivemodel.Message) bool {
+	return msg != nil && msg.GetType() == beehivemodel.MessageTypeResync
 }
 
 // GetNodeMessagePool returns the message pool for given node

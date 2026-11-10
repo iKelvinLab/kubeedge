@@ -41,6 +41,11 @@ const (
 	ResourceTypeCSR                 = "certificatesigningrequest"
 
 	ResourceTypeK8sCA = "k8s/ca.crt"
+
+	// MessageTypeResync indicates a periodic resync message that compensates
+	// for edge-side record loss. CloudHub permits same-RV resync messages to
+	// pass the reliable-sync gate, while continuing to reject older versions.
+	MessageTypeResync = "resync"
 )
 
 // Message struct
