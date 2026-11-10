@@ -48,6 +48,17 @@ func SetMetaType(obj runtime.Object) error {
 // It returns nil if obj is not a runtime.Object or carries no object
 // metadata; callers must treat nil as "drop the object".
 func SetMetaTypeOnCopy(obj interface{}) runtime.Object {
+	return SetMetaTypeOnCopyWith(obj, scheme.Scheme)
+}
+
+// SetMetaTypeOnCopyWith is SetMetaTypeOnCopy with an explicit scheme list.
+// KubeEdge CRD objects (e.g. ServiceAccountAccess) are not registered in the
+// client-go scheme, so cloud-side callers that may carry typed KubeEdge
+// objects must also pass the KubeEdge scheme; the first scheme that
+// recognizes the type wins. A GVK lookup failure is logged but not fatal:
+// the un-stamped copy is still returned (callers rely on upsert semantics,
+// and silently dropping the object would break reliable sync accounting).
+func SetMetaTypeOnCopyWith(obj interface{}, schemes ...*runtime.Scheme) runtime.Object {
 	ro, ok := obj.(runtime.Object)
 	if !ok {
 		klog.Warningf("[metaserver] SetMetaTypeOnCopy: not a runtime.Object: %T", obj)
@@ -60,8 +71,23 @@ func SetMetaTypeOnCopy(obj interface{}) runtime.Object {
 		return nil
 	}
 	copied := ro.DeepCopyObject()
-	if err := SetMetaType(copied); err != nil {
-		klog.Warningf("[metaserver] SetMetaTypeOnCopy: failed to set metatype: %v", err)
+	var lastErr error
+	stamped := false
+	for _, s := range schemes {
+		if s == nil {
+			continue
+		}
+		kinds, _, err := s.ObjectKinds(copied)
+		if err != nil || len(kinds) == 0 {
+			lastErr = err
+			continue
+		}
+		copied.GetObjectKind().SetGroupVersionKind(kinds[0])
+		stamped = true
+		break
+	}
+	if !stamped {
+		klog.Warningf("[metaserver] SetMetaTypeOnCopy: failed to set metatype (%T): %v", copied, lastErr)
 	}
 	return copied
 }

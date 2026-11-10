@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 
 	"github.com/kubeedge/api/apis/reliablesyncs/v1alpha1"
+	policyv1alpha1 "github.com/kubeedge/api/apis/policy/v1alpha1"
 	crdfake "github.com/kubeedge/api/client/clientset/versioned/fake"
 	"github.com/kubeedge/beehive/pkg/common"
 	beehiveContext "github.com/kubeedge/beehive/pkg/core/context"
@@ -294,5 +295,35 @@ func TestGCOrphanedObjectSyncKeepsAccountingOnBuildFailure(t *testing.T) {
 	}
 	if got.Name != sync.Name {
 		t.Fatalf("unexpected ObjectSync %q, want %q", got.Name, sync.Name)
+	}
+}
+
+// TestBuildEdgeControllerMessageKubeEdgeCRD stamps the GVK on typed KubeEdge
+// CRD objects too: the shared informer manager serves typed informers for
+// KubeEdge CRDs (e.g. ServiceAccountAccess), and a message without in-body
+// apiVersion/kind is silently discarded by the edge, stalling the ObjectSync
+// accounting forever (regression: 2026-11-10 sa-access resync canary).
+func TestBuildEdgeControllerMessageKubeEdgeCRD(t *testing.T) {
+	acc := &policyv1alpha1.ServiceAccountAccess{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "kube-system",
+			Name:      "cilium",
+		},
+	}
+
+	msg := buildEdgeControllerMessage("node1", acc.Namespace, "serviceaccountaccess", acc.Name, model.UpdateOperation, acc)
+	if msg == nil {
+		t.Fatal("buildEdgeControllerMessage() = nil, want a message")
+	}
+	body, ok := msg.GetContent().(*policyv1alpha1.ServiceAccountAccess)
+	if !ok {
+		t.Fatalf("message content type = %T, want *policyv1alpha1.ServiceAccountAccess", msg.GetContent())
+	}
+	gvk := body.GroupVersionKind()
+	if gvk.Kind != "ServiceAccountAccess" || gvk.Group != "policy.kubeedge.io" {
+		t.Errorf("message body GVK = %v, want policy.kubeedge.io/v1alpha1 ServiceAccountAccess", gvk)
+	}
+	if body == acc {
+		t.Errorf("message body must be a private copy, not the caller's object")
 	}
 }

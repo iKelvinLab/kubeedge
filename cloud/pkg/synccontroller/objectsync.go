@@ -11,8 +11,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/kubeedge/api/apis/reliablesyncs/v1alpha1"
+	edgescheme "github.com/kubeedge/api/client/clientset/versioned/scheme"
 	beehiveContext "github.com/kubeedge/beehive/pkg/core/context"
 	"github.com/kubeedge/beehive/pkg/core/model"
 	"github.com/kubeedge/kubeedge/cloud/pkg/common/messagelayer"
@@ -141,7 +143,12 @@ func buildEdgeControllerMessage(nodeName, namespace, resourceType, resourceName,
 	// with the GVK stamped on it. The edge decodes unstructured bodies
 	// through their in-body apiVersion/kind, and in-place stamping of the
 	// cache object caused the concurrent map read/write panic.
-	body := util.SetMetaTypeOnCopy(obj)
+	// Typed KubeEdge CRD objects (e.g. ServiceAccountAccess, from the shared
+	// informer manager's KubeEdge factory) are unknown to the client-go
+	// scheme, so the KubeEdge scheme must be tried as well — otherwise the
+	// stamped GVK is silently dropped and the edge discards the message
+	// (missing kind), stalling the ObjectSync accounting forever.
+	body := util.SetMetaTypeOnCopyWith(obj, scheme.Scheme, edgescheme.Scheme)
 	if body == nil {
 		klog.Errorf("failed to build message body for resource %s/%s", resourceType, resourceName)
 		return nil

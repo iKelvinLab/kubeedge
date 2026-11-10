@@ -13,7 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 
+	policyv1alpha1 "github.com/kubeedge/api/apis/policy/v1alpha1"
 	beehiveModel "github.com/kubeedge/beehive/pkg/core/model"
 )
 
@@ -373,4 +375,66 @@ func TestUnstructuredAttr(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetMetaTypeOnCopyWith(t *testing.T) {
+	edgescheme := testKubeEdgeScheme(t)
+
+	newSaAccess := func() *policyv1alpha1.ServiceAccountAccess {
+		return &policyv1alpha1.ServiceAccountAccess{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "cilium"},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		obj     interface{}
+		schemes []*runtime.Scheme
+		wantGVK schema.GroupVersionKind
+	}{
+		{
+			name:    "typed kubeedge CRD stamped via kubeedge scheme",
+			obj:     newSaAccess(),
+			schemes: []*runtime.Scheme{scheme.Scheme, edgescheme},
+			wantGVK: policyv1alpha1.SchemeGroupVersion.WithKind("ServiceAccountAccess"),
+		},
+		{
+			name:    "kubeedge CRD left unstamped with client-go scheme only (legacy behavior)",
+			obj:     newSaAccess(),
+			schemes: []*runtime.Scheme{scheme.Scheme},
+			wantGVK: schema.GroupVersionKind{},
+		},
+		{
+			name: "built-in object stamped via first scheme",
+			obj: &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "cilium"},
+			},
+			schemes: []*runtime.Scheme{scheme.Scheme, edgescheme},
+			wantGVK: schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ServiceAccount"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SetMetaTypeOnCopyWith(tt.obj, tt.schemes...)
+			if got == nil {
+				t.Fatalf("SetMetaTypeOnCopyWith() = nil, want non-nil copy")
+			}
+			if gotGVK := got.GetObjectKind().GroupVersionKind(); gotGVK != tt.wantGVK {
+				t.Errorf("stamped GVK = %v, want %v", gotGVK, tt.wantGVK)
+			}
+		})
+	}
+
+	if got := SetMetaTypeOnCopyWith("not-an-object", scheme.Scheme); got != nil {
+		t.Errorf("SetMetaTypeOnCopyWith(non runtime.Object) = %v, want nil", got)
+	}
+}
+
+func testKubeEdgeScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := policyv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to build kubeedge scheme: %v", err)
+	}
+	return s
 }
