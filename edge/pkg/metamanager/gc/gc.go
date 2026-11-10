@@ -114,7 +114,7 @@ func (g *GC) reconcileGVR(ctx context.Context, gvr schema.GroupVersionResource) 
 		} else {
 			// Transient or authorization error: never interpret as "all
 			// gone"; skip this GVR for this round.
-			klog.V(2).Infof("[meta_v2 gc] skip %v, cloud list failed: %v", gvr, err)
+			klog.Infof("[meta_v2 gc] skip %v, cloud list failed: %v", gvr, err)
 		}
 		return
 	}
