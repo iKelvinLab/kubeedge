@@ -327,6 +327,14 @@ func subtractSlice(source, subTarget []string) []string {
 }
 
 func (c *Controller) send2Edge(acc *policyv1alpha1.ServiceAccountAccess, targets []string, opr string) {
+	sendSaAccess2Edge(c.MessageLayer, acc, targets, opr)
+}
+
+// sendSaAccess2Edge pushes the given ServiceAccountAccess to the target
+// nodes. It is shared by the event-driven reconcile path and the periodic
+// resync runner. Send failures are logged only: the resync runner retries on
+// its next round, and the reconcile path is re-triggered by watch events.
+func sendSaAccess2Edge(layer messagelayer.MessageLayer, acc *policyv1alpha1.ServiceAccountAccess, targets []string, opr string) {
 	klog.V(4).Infof("send2Edge for serviceaccount %s/%s: %v (%s)",
 		acc.Namespace, acc.Spec.ServiceAccount.Name, targets, opr)
 	sendObj := acc.DeepCopy()
@@ -342,7 +350,7 @@ func (c *Controller) send2Edge(acc *policyv1alpha1.ServiceAccountAccess, targets
 		msg := model.NewMessage("").
 			SetResourceVersion(sendObj.ResourceVersion).
 			FillBody(sendObj).BuildRouter(modules.PolicyControllerModuleName, constants.GroupResource, resource, opr)
-		if err := c.MessageLayer.Send(*msg); err != nil {
+		if err := layer.Send(*msg); err != nil {
 			klog.Warningf("send message %s failed with error: %s", resource, err)
 			continue
 		}
