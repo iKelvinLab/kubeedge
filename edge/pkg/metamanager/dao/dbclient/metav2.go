@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -37,6 +38,36 @@ type MetaV2Service struct {
 
 func NewMetaV2Service() *MetaV2Service {
 	return &MetaV2Service{db: dao.GetDB()}
+}
+
+// ListGVRs returns the distinct GVRs currently present in meta_v2, excluding
+// pass-through rows (empty GVR column). It feeds the edge-side cache GC.
+// The stored strings come from gvr.String(), which renders core-group GVRs
+// as "version/resource" and grouped ones as "group/version/resource".
+func (s *MetaV2Service) ListGVRs() ([]schema.GroupVersionResource, error) {
+	var gvrs []string
+	if err := s.db.Model(&models.MetaV2{}).
+		Where(models.GVR+" != ?", "").
+		Distinct(models.GVR).
+		Pluck(models.GVR, &gvrs).Error; err != nil {
+		return nil, err
+	}
+	result := make([]schema.GroupVersionResource, 0, len(gvrs))
+	for _, raw := range gvrs {
+		parts := strings.Split(raw, "/")
+		var gvr schema.GroupVersionResource
+		switch len(parts) {
+		case 2:
+			gvr = schema.GroupVersionResource{Version: parts[0], Resource: parts[1]}
+		case 3:
+			gvr = schema.GroupVersionResource{Group: parts[0], Version: parts[1], Resource: parts[2]}
+		default:
+			klog.Warningf("skip unparsable GVR %q in meta_v2", raw)
+			continue
+		}
+		result = append(result, gvr)
+	}
+	return result, nil
 }
 
 func (s *MetaV2Service) RawMetaByGVRNN(gvr schema.GroupVersionResource, namespace string, name string) (*[]models.MetaV2, error) {
