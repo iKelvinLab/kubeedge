@@ -25,6 +25,14 @@ const (
 	ResourceGroupName = "resource"
 	FuncGroupName     = "func"
 	UserGroupName     = "user"
+
+	// ResourceTypeConnection and OperationReconnect form an edge-internal
+	// control signal: a module sends it to edgehub (group hub) to request
+	// tearing down and re-establishing the cloud session, e.g. when the lease
+	// bridge detects a half-dead connection. EdgeHub consumes it locally and
+	// never forwards it to the cloud.
+	ResourceTypeConnection = "connection"
+	OperationReconnect     = "reconnect"
 )
 
 // BuildMsg returns message object with router and content details

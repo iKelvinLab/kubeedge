@@ -341,6 +341,37 @@ func TestRouteToCloud(t *testing.T) {
 	}
 }
 
+// TestRouteToCloudConnectionResetRequest verifies that an edge-internal
+// connection-reset control message is consumed by routeToCloud itself: it must
+// raise the reconnect signal and must never be forwarded to the cloud (the
+// adapter mock expects no Send call at all).
+func TestRouteToCloudConnectionResetRequest(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+	// No EXPECT().Send(...): any forward of the control message to the cloud
+	// fails the test as an unexpected mock call.
+	mockAdapter := edgehub.NewMockAdapter(mockCtrl)
+
+	hub := &EdgeHub{
+		chClient:      mockAdapter,
+		reconnectChan: make(chan struct{}),
+	}
+
+	go hub.routeToCloud()
+
+	msg := model.NewMessage("").
+		BuildRouter(modules.EdgedModuleName, modules.HubGroup,
+			message.ResourceTypeConnection, message.OperationReconnect)
+	beehiveContext.Send(modules.EdgeHubModuleName, *msg)
+
+	select {
+	case <-hub.reconnectChan:
+		// reconnect requested, as expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection reset request did not trigger the reconnect signal")
+	}
+}
+
 // TestKeepalive() tests whether ping message sent to the cloud at regular intervals happens properly
 func TestKeepalive(t *testing.T) {
 	CertFile := "/tmp/kubeedge/certs/edge.crt"

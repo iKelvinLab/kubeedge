@@ -87,6 +87,16 @@ func (eh *EdgeHub) routeToCloud() {
 			continue
 		}
 
+		// Cloud connection reset requests are edge-internal control signals
+		// (e.g. the lease bridge detecting a half-dead session). Consume
+		// them here: never forward to the cloud, tear the session down and
+		// let the reconnect loop re-establish it.
+		if isConnectionResetRequest(message) {
+			klog.Warningf("cloud connection reset requested by module %s, will reconnect", message.GetSource())
+			eh.reconnectChan <- struct{}{}
+			return
+		}
+
 		err = eh.tryThrottle(message.GetID())
 		if err != nil {
 			klog.Errorf("msgID: %s, client rate limiter returned an error: %v ", message.GetID(), err)
@@ -171,4 +181,13 @@ func (eh *EdgeHub) tryThrottle(msgID string) error {
 	}
 
 	return nil
+}
+
+// isConnectionResetRequest reports whether the message is an edge-internal
+// control signal asking edgehub to tear down and re-establish the cloud
+// session (see common/message ResourceTypeConnection).
+func isConnectionResetRequest(message model.Message) bool {
+	return message.GetGroup() == modules.HubGroup &&
+		message.GetResource() == messagepkg.ResourceTypeConnection &&
+		message.GetOperation() == messagepkg.OperationReconnect
 }
