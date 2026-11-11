@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -208,6 +209,76 @@ func TestLeases_Get(t *testing.T) {
 				assert.NoError(err)
 				assert.Equal(test.expectedLease, lease)
 			}
+		})
+	}
+}
+
+// TestLeases_UseDedicatedShortTimeout verifies that all lease operations send
+// their sync request with the dedicated short timeout (10s) instead of the
+// global 60s metaclient timeout, so heartbeat calls fail fast under a
+// degraded WAN link instead of blocking the vendored lease controller.
+func TestLeases_UseDedicatedShortTimeout(t *testing.T) {
+	assert := assert.New(t)
+
+	leaseName := "timeout-lease"
+	inputLease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: leaseName,
+		},
+	}
+
+	ops := []struct {
+		name   string
+		call   func(client LeasesInterface) error
+		opName string
+	}{
+		{
+			name:   "Create",
+			opName: model.InsertOperation,
+			call: func(c LeasesInterface) error {
+				_, err := c.Create(inputLease)
+				return err
+			},
+		},
+		{
+			name:   "Update",
+			opName: model.UpdateOperation,
+			call: func(c LeasesInterface) error {
+				_, err := c.Update(inputLease)
+				return err
+			},
+		},
+		{
+			name:   "Get",
+			opName: model.QueryOperation,
+			call: func(c LeasesInterface) error {
+				_, err := c.Get(leaseName)
+				return err
+			},
+		},
+	}
+
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			mockSend := &mockSendInterface{}
+			mockSend.sendSyncWithTimeoutFunc = func(message *model.Message, timeout time.Duration) (*model.Message, error) {
+				assert.Equal(syncLeaseRespTimeout, timeout,
+					"lease operations must use the dedicated 10s timeout")
+				assert.Equal(op.opName, message.GetOperation())
+
+				resp := model.NewMessage(message.GetID())
+				leaseResp := LeaseResp{
+					Object: inputLease,
+					Err:    apierrors.StatusError{},
+				}
+				content, _ := json.Marshal(leaseResp)
+				resp.Content = content
+				return resp, nil
+			}
+
+			leaseClient := newLeases(testNamespace, mockSend)
+			assert.NoError(op.call(leaseClient))
+			assert.Equal(syncLeaseRespTimeout, mockSend.lastSyncTimeout)
 		})
 	}
 }

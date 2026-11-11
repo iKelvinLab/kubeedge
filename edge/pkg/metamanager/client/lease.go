@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +29,14 @@ import (
 	"github.com/kubeedge/kubeedge/edge/pkg/common/message"
 	"github.com/kubeedge/kubeedge/edge/pkg/common/modules"
 )
+
+// syncLeaseRespTimeout is the dedicated sync-wait timeout for lease
+// operations. Lease renewal runs on a ~10s cadence and a node is declared
+// NotReady after ~40s without renewal, so waiting for the global 60s
+// (stacked with its internal 3x wait.Poll retries) only drags the heartbeat
+// loop into long blocking waits under a degraded WAN link and can wedge the
+// vendored lease controller. Fail fast instead.
+const syncLeaseRespTimeout = 10 * time.Second
 
 // LeasesGetter to get lease interface
 type LeasesGetter interface {
@@ -62,7 +71,7 @@ type LeaseResp struct {
 func (c *leases) Create(lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
 	resource := fmt.Sprintf("%s/%s/%s", c.namespace, model.ResourceTypeLease, lease.Name)
 	leaseMsg := message.BuildMsg(modules.MetaGroup, "", modules.EdgedModuleName, resource, model.InsertOperation, lease)
-	resp, err := c.send.SendSync(leaseMsg)
+	resp, err := c.send.SendSyncWithTimeout(leaseMsg, syncLeaseRespTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("create lease failed, err: %v", err)
 	}
@@ -77,7 +86,7 @@ func (c *leases) Create(lease *coordinationv1.Lease) (*coordinationv1.Lease, err
 func (c *leases) Update(lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
 	resource := fmt.Sprintf("%s/%s/%s", c.namespace, model.ResourceTypeLease, lease.Name)
 	leaseMsg := message.BuildMsg(modules.MetaGroup, "", modules.EdgedModuleName, resource, model.UpdateOperation, lease)
-	resp, err := c.send.SendSync(leaseMsg)
+	resp, err := c.send.SendSyncWithTimeout(leaseMsg, syncLeaseRespTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("update lease failed, err: %v", err)
 	}
@@ -92,7 +101,7 @@ func (c *leases) Update(lease *coordinationv1.Lease) (*coordinationv1.Lease, err
 func (c *leases) Get(name string) (*coordinationv1.Lease, error) {
 	resource := fmt.Sprintf("%s/%s/%s", c.namespace, model.ResourceTypeLease, name)
 	leaseMsg := message.BuildMsg(modules.MetaGroup, "", modules.EdgedModuleName, resource, model.QueryOperation, nil)
-	resp, err := c.send.SendSync(leaseMsg)
+	resp, err := c.send.SendSyncWithTimeout(leaseMsg, syncLeaseRespTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("query lease failed, err: %v", err)
 	}

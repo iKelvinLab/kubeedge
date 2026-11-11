@@ -108,6 +108,13 @@ func New() CoreInterface {
 // SendInterface is to sync interface
 type SendInterface interface {
 	SendSync(message *model.Message) (*model.Message, error)
+	// SendSyncWithTimeout sends the message in sync mode and waits at most
+	// the given timeout for the response. Unlike SendSync it performs a
+	// single attempt with no wait.Poll retry stacking, so the caller fully
+	// controls how long one call may block. Used by latency-sensitive
+	// callers (e.g. node lease heartbeats) that need to fail fast under a
+	// degraded WAN link.
+	SendSyncWithTimeout(message *model.Message, timeout time.Duration) (*model.Message, error)
 	Send(message *model.Message)
 }
 
@@ -136,6 +143,17 @@ func (s *send) SendSync(message *model.Message) (*model.Message, error) {
 		return true, err
 	})
 	return &resp, err
+}
+
+// SendSyncWithTimeout sends the message in sync mode with an explicit timeout
+// and no internal retries: a single attempt that fails fast. See
+// SendInterface.SendSyncWithTimeout.
+func (s *send) SendSyncWithTimeout(message *model.Message, timeout time.Duration) (*model.Message, error) {
+	resp, err := beehiveContext.SendSync(modules.MetaManagerModuleName, *message, timeout)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 func (s *send) Send(message *model.Message) {

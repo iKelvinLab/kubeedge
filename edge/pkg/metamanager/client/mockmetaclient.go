@@ -18,6 +18,7 @@ package client
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/kubeedge/beehive/pkg/core/model"
 	"github.com/kubeedge/kubeedge/edge/pkg/metamanager/dao/models"
@@ -27,11 +28,29 @@ const testNamespace = "default"
 
 // mockSendInterface is a mock implementation of SendInterface
 type mockSendInterface struct {
-	sendSyncFunc func(*model.Message) (*model.Message, error)
-	sendFunc     func(*model.Message)
+	sendSyncFunc            func(*model.Message) (*model.Message, error)
+	sendSyncWithTimeoutFunc func(*model.Message, time.Duration) (*model.Message, error)
+	sendFunc                func(*model.Message)
+
+	// lastSyncTimeout records the timeout of the most recent
+	// SendSyncWithTimeout call, for assertions in tests.
+	lastSyncTimeout time.Duration
 }
 
 func (m *mockSendInterface) SendSync(msg *model.Message) (*model.Message, error) {
+	if m.sendSyncFunc != nil {
+		return m.sendSyncFunc(msg)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockSendInterface) SendSyncWithTimeout(msg *model.Message, timeout time.Duration) (*model.Message, error) {
+	m.lastSyncTimeout = timeout
+	if m.sendSyncWithTimeoutFunc != nil {
+		return m.sendSyncWithTimeoutFunc(msg, timeout)
+	}
+	// Fall back to the plain SendSync behavior so existing tests that only
+	// stub sendSyncFunc keep working.
 	if m.sendSyncFunc != nil {
 		return m.sendSyncFunc(msg)
 	}

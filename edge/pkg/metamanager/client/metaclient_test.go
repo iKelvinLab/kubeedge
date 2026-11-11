@@ -70,6 +70,10 @@ func (m *MockSend) SendSync(message *model.Message) (*model.Message, error) {
 	return resp, nil
 }
 
+func (m *MockSend) SendSyncWithTimeout(message *model.Message, _ time.Duration) (*model.Message, error) {
+	return m.SendSync(message)
+}
+
 func (m *MockSend) Send(message *model.Message) {
 	m.lastResource = message.GetResource()
 	m.lastOperation = message.GetOperation()
@@ -261,6 +265,31 @@ func TestSendSyncWithError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSendSyncWithTimeoutSingleAttempt verifies SendSyncWithTimeout performs a
+// single attempt that fails fast: with no responder on the metamanager module
+// channel it must return after the given timeout, without the 3x wait.Poll
+// retry stacking of SendSync.
+func TestSendSyncWithTimeoutSingleAttempt(t *testing.T) {
+	sender := newSend()
+
+	message := &model.Message{
+		Header: model.MessageHeader{
+			ID: "sync-with-timeout-id",
+		},
+		Router: model.MessageRoute{
+			Resource:  "test/resource",
+			Operation: "test-operation",
+		},
+	}
+
+	start := time.Now()
+	_, err := sender.SendSyncWithTimeout(message, 50*time.Millisecond)
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "must fail fast after a single attempt, not stack retries")
 }
 
 // TestSendImplementation directly tests the actual send struct implementation with minimal execution
