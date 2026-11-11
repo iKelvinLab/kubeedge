@@ -1350,9 +1350,55 @@ func (uc *UpstreamController) createOrUpdateLease() {
 				klog.V(4).Infof("message: %s, create lease successfully, namespace: %s, name: %s", msg.GetID(), namespace, name)
 
 			case model.UpdateOperation:
-				resp, err := uc.kubeClient.CoordinationV1().Leases(namespace).Update(utilcontext.FromMessage(context.TODO(), msg), lease, metaV1.UpdateOptions{})
+				ctx := utilcontext.FromMessage(context.TODO(), msg)
+
+				var (
+					resp *coordinationv1.Lease
+					err  error
+				)
+				if lease.Spec.RenewTime != nil {
+					// Lease renewal only mutates spec.renewTime. Relay it as a
+					// JSON Merge Patch instead of a full Update: the request
+					// carries no resourceVersion, so the apiserver merges the
+					// field atomically and renewal becomes immune to
+					// optimistic-lock conflicts, no matter whether they come
+					// from late-arriving in-flight requests or from edge
+					// sessions drifting across CloudCore replicas.
+					var patchBytes []byte
+					patchBytes, err = json.Marshal(map[string]interface{}{
+						"spec": map[string]interface{}{
+							"renewTime": lease.Spec.RenewTime,
+						},
+					})
+					if err == nil {
+						resp, err = uc.kubeClient.CoordinationV1().Leases(namespace).Patch(
+							ctx, name, patchtypes.MergePatchType, patchBytes, metaV1.PatchOptions{})
+					}
+				} else {
+					// Fallback for lease updates that do not carry a
+					// renewTime (full replace semantics, resourceVersion
+					// still enforced by the apiserver).
+					resp, err = uc.kubeClient.CoordinationV1().Leases(namespace).Update(
+						ctx, lease, metaV1.UpdateOptions{})
+				}
+
+				// Absorb optimistic-lock conflicts inside the cloud LAN
+				// instead of leaking them back over the high-latency edge
+				// WAN link: re-GET the latest object once and retry a
+				// single time with the fresh resourceVersion.
+				if err != nil && errors.IsConflict(err) {
+					klog.Warningf("Update lease %s conflict, re-get latest and retry once, error: %v", name, err)
+					var latest *coordinationv1.Lease
+					latest, err = uc.kubeClient.CoordinationV1().Leases(namespace).Get(ctx, name, metaV1.GetOptions{})
+					if err == nil {
+						latest.Spec = lease.Spec
+						resp, err = uc.kubeClient.CoordinationV1().Leases(namespace).Update(
+							ctx, latest, metaV1.UpdateOptions{})
+					}
+				}
+
 				if err != nil {
-					klog.Errorf("Update lease %s failed, error: %v", name, err)
+					klog.Errorf("Update/patch lease %s failed, error: %v", name, err)
 				}
 
 				resMsg := model.NewMessage(msg.GetID()).
